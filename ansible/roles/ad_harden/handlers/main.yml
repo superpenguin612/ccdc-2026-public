@@ -1,0 +1,5 @@
+---
+- name: Restart DNS
+  ansible.windows.win_service:
+    name: DNS
+    state: restarted

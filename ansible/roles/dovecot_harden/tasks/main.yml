@@ -1,0 +1,115 @@
+---
+# ---------------------------------------------------------------------------
+# Dovecot hardening for fedora-webmail (POP3 scored service)
+# Service must remain accessible over plaintext — no TLS enforcement
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# 0. Back up config files before touching anything
+# ---------------------------------------------------------------------------
+- name: Dovecot — back up config files
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "{{ item }}.ccdc.bak"
+    remote_src: true
+    force: false
+    mode: preserve
+  become: true
+  failed_when: false
+  loop:
+    - /etc/dovecot/dovecot.conf
+    - /etc/dovecot/conf.d/10-auth.conf
+    - /etc/dovecot/conf.d/10-mail.conf
+    - /etc/dovecot/conf.d/10-logging.conf
+
+# ---------------------------------------------------------------------------
+# 1. Configure enabled protocols (pop3 only — imap not scored)
+# ---------------------------------------------------------------------------
+- name: Dovecot — configure enabled protocols
+  ansible.builtin.lineinfile:
+    path: /etc/dovecot/dovecot.conf
+    regexp: "^#?protocols"
+    line: "protocols = {{ dovecot_harden_protocols }}"
+  become: true
+  notify: Restart dovecot
+
+# ---------------------------------------------------------------------------
+# 2. Set auth failure delay (slow brute force)
+# ---------------------------------------------------------------------------
+- name: Dovecot — set auth failure delaye
+  ansible.builtin.lineinfile:
+    path: /etc/dovecot/conf.d/10-auth.conf
+    regexp: "^#?auth_failure_delay"
+    line: "auth_failure_delay = {{ dovecot_harden_auth_failure_delay }}"
+  become: true
+  notify: Restart dovecot
+
+# ---------------------------------------------------------------------------
+# 3. Allow plaintext auth (service is scored over plain POP3)
+# ---------------------------------------------------------------------------
+- name: Dovecot — allow plaintext auth
+  ansible.builtin.lineinfile:
+    path: /etc/dovecot/conf.d/10-auth.conf
+    regexp: "^#?disable_plaintext_auth"
+    line: "disable_plaintext_auth = no"
+  become: true
+  notify: Restart dovecot
+
+# ---------------------------------------------------------------------------
+# 4. Set mail_location
+# ---------------------------------------------------------------------------
+- name: Dovecot — set mail_location
+  ansible.builtin.lineinfile:
+    path: /etc/dovecot/conf.d/10-mail.conf
+    regexp: "^#?mail_location"
+    line: "mail_location = {{ dovecot_harden_mail_location }}"
+  become: true
+  notify: Restart dovecot
+
+# ---------------------------------------------------------------------------
+# 5. Enable verbose login logging
+# ---------------------------------------------------------------------------
+- name: Dovecot — enable verbose login logging
+  ansible.builtin.blockinfile:
+    path: /etc/dovecot/conf.d/10-logging.conf
+    marker: "# {mark} ANSIBLE MANAGED - ccdc logging"
+    block: |
+      log_path = /var/log/dovecot.log
+      log_timestamp = "%Y-%m-%d %H:%M:%S "
+      auth_verbose = yes
+      auth_verbose_passwords = no
+  become: true
+  notify: Restart dovecot
+
+# ---------------------------------------------------------------------------
+# 6. Harden config file permissions
+# ---------------------------------------------------------------------------
+- name: Dovecot — find dovecot config files
+  ansible.builtin.find:
+    paths:
+      - /etc/dovecot
+      - /etc/dovecot/conf.d
+    patterns: "*.conf"
+    recurse: false
+  register: _dovecot_conf_files
+  become: true
+
+- name: Dovecot — set config file permissions to 640
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    owner: root
+    group: dovecot
+    mode: "0640"
+  loop: "{{ _dovecot_conf_files.files }}"
+  become: true
+  failed_when: false
+
+# ---------------------------------------------------------------------------
+# 7. Ensure dovecot is running
+# ---------------------------------------------------------------------------
+- name: Dovecot — ensure service is started and enabled
+  ansible.builtin.service:
+    name: dovecot
+    state: started
+    enabled: true
+  become: true

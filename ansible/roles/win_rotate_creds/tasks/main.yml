@@ -1,0 +1,39 @@
+---
+- include_tasks: non_dc.yml
+  when: inventory_hostname not in groups['domain_controllers']
+
+- include_tasks: dc.yml
+  when: inventory_hostname in groups['domain_controllers']
+
+- name: Switch to new credentials
+  ansible.builtin.set_fact:
+    ansible_user:     "{{ vault_new_credentials[inventory_hostname].user }}"
+    ansible_password: "{{ vault_new_credentials[inventory_hostname].password }}"
+    ansible_port:     "{{ ansible_port | int }}"
+  no_log: true
+
+- name: Reset connection to re-authenticate as new user
+  ansible.builtin.meta: reset_connection
+
+- name: Verify connectivity with new credentials
+  ansible.windows.win_ping:
+  retries: 3
+
+- name: Log off all active sessions
+  ansible.windows.win_shell: |
+    $lines = (query session 2>&1) | Select-String -Pattern "Active"
+    foreach ($line in $lines) {
+        if ($line -match "services") { continue }
+        $parts = $line.ToString().Trim() -split '\s+'
+        $sessionId = $null
+        foreach ($part in $parts) {
+            if ($part -match '^\d+$') { $sessionId = $part; break }
+        }
+        if ($sessionId) { logoff $sessionId /server:localhost 2>$null }
+    }
+  ignore_errors: yes
+  changed_when: false
+
+- name: Print confirmation
+  ansible.builtin.debug:
+    msg: "{{ inventory_hostname }}: rotated to {{ vault_new_credentials[inventory_hostname].user }}"

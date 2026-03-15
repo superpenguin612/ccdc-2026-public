@@ -1,0 +1,204 @@
+---
+# ---------------------------------------------------------------------------
+# Webshell scanner — find pre-planted shells and suspicious PHP before
+# competition scoring begins. Run early, right after credential rotation.
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# 1. Scan for webshell signatures in PHP files
+# ---------------------------------------------------------------------------
+- name: Webshell — scan for shell function signatures
+  ansible.builtin.shell: |
+    grep -rl \
+      -e 'eval(base64_decode' \
+      -e 'eval(gzinflate' \
+      -e 'eval(str_rot13' \
+      -e 'eval(gzuncompress' \
+      -e 'assert($_' \
+      -e 'preg_replace.*\/e' \
+      -e 'passthru(' \
+      -e 'shell_exec(' \
+      -e 'system($_' \
+      -e 'exec($_' \
+      -e 'popen($_' \
+      -e 'proc_open(' \
+      -e '\$_REQUEST\[.*\](.*exec\|system\|passthru\|eval)' \
+      -e 'base64_decode.*\$_(GET\|POST\|REQUEST\|COOKIE)' \
+      -e 'FilesMan\|b374k\|r57shell\|c99shell\|WSO\|indoxploit' \
+      --include='*.php' --include='*.php5' --include='*.phtml' --include='*.phar' \
+      {{ webshell_scan_paths | join(' ') }} 2>/dev/null || true
+  register: _webshell_hits
+  changed_when: false
+  become: true
+
+# ---------------------------------------------------------------------------
+# 2. Find files with double extensions (shell.php.jpg → php last wins)
+# ---------------------------------------------------------------------------
+- name: Webshell — scan for double-extension files
+  ansible.builtin.shell: |
+    find {{ webshell_scan_paths | join(' ') }} \
+      \( -name '*.php.jpg' -o -name '*.php.png' -o -name '*.php.gif' \
+         -o -name '*.php.bak' -o -name '*.php~' -o -name '*.php.old' \) \
+      2>/dev/null || true
+  register: _webshell_double_ext
+  changed_when: false
+  become: true
+
+# ---------------------------------------------------------------------------
+# 3. Find non-PHP executables in webroot (CGI scripts, ELF binaries)
+# ---------------------------------------------------------------------------
+- name: Webshell — scan for ELF binaries in webroot
+  ansible.builtin.shell: |
+    find {{ webshell_scan_paths | join(' ') }} -type f \
+      ! -name '*.php' ! -name '*.html' ! -name '*.js' ! -name '*.css' \
+      ! -name '*.jpg' ! -name '*.png' ! -name '*.gif' ! -name '*.ico' \
+      ! -name '*.svg' ! -name '*.woff' ! -name '*.ttf' ! -name '*.txt' \
+      ! -name '*.xml' ! -name '*.json' ! -name '*.map' ! -name '*.pdf' \
+      2>/dev/null | xargs -r file 2>/dev/null | grep -i 'elf\|perl script\|python script\|shell script' || true
+  register: _webshell_binaries
+  changed_when: false
+  become: true
+
+# ---------------------------------------------------------------------------
+# 4. Find PHP files modified after the median mtime of the webroot
+#    Rationale: the bulk of legitimate app files were deployed together.
+#    Files significantly newer than the median are suspicious outliers —
+#    this catches webshells even if they were planted days ago.
+# ---------------------------------------------------------------------------
+- name: Webshell — compute median mtime of PHP files in webroot
+  ansible.builtin.shell: |
+    tmpfile=$(mktemp)
+    find {{ webshell_scan_paths | join(' ') }} -type f \
+      \( -name '*.php' -o -name '*.php5' -o -name '*.phtml' -o -name '*.phar' \) \
+      -printf '%T@\n' 2>/dev/null | sort -n > "$tmpfile"
+    count=$(wc -l < "$tmpfile")
+    if [ "$count" -eq 0 ]; then
+      echo 0
+    else
+      mid=$(( count / 2 + 1 ))
+      sed -n "${mid}p" "$tmpfile" | cut -d. -f1
+    fi
+    rm -f "$tmpfile"
+  register: _webshell_median_mtime
+  changed_when: false
+  become: true
+
+- name: Webshell — find PHP files newer than median mtime
+  ansible.builtin.shell: |
+    median={{ _webshell_median_mtime.stdout | trim }}
+    if [[ "$median" == "0" ]]; then
+      echo "No PHP files found in scan paths"
+      exit 0
+    fi
+    find {{ webshell_scan_paths | join(' ') }} -type f \
+      \( -name '*.php' -o -name '*.php5' -o -name '*.phtml' -o -name '*.phar' -o -name '*.shtml' \) \
+      -printf '%T@ %p\n' 2>/dev/null \
+    | awk -v median="$median" '$1 > median { printf "%s  [mtime: %s  median: %s  delta: +%ds]\n", $2, $1, median, ($1 - median) }' \
+    | sort -t'[' -k2 -rn \
+    || true
+  register: _webshell_recent
+  changed_when: false
+  become: true
+
+# ---------------------------------------------------------------------------
+# 5. Find world-writable PHP files (red team may have chmod'd their shell)
+# ---------------------------------------------------------------------------
+- name: Webshell — find world-writable PHP files
+  ansible.builtin.shell: |
+    find {{ webshell_scan_paths | join(' ') }} -type f -perm -o+w \
+      \( -name '*.php' -o -name '*.php5' -o -name '*.phtml' \) \
+      2>/dev/null || true
+  register: _webshell_writable
+  changed_when: false
+  become: true
+
+# ---------------------------------------------------------------------------
+# 6. Find hidden files/dirs in webroot (dot-files are unusual)
+# ---------------------------------------------------------------------------
+- name: Webshell — find hidden files in webroot
+  ansible.builtin.shell: |
+    find {{ webshell_scan_paths | join(' ') }} -name '.*' -not -name '.htaccess' \
+      -not -name '.gitignore' -not -path '*/.git/*' \
+      2>/dev/null || true
+  register: _webshell_hidden
+  changed_when: false
+  become: true
+
+# ---------------------------------------------------------------------------
+# 7. Quarantine suspicious files (optional)
+# ---------------------------------------------------------------------------
+- name: Webshell — create quarantine directory
+  ansible.builtin.file:
+    path: /tmp/webshell_quarantine
+    state: directory
+    mode: "0700"
+    owner: root
+  become: true
+  when:
+    - webshell_scan_quarantine
+    - _webshell_hits.stdout | length > 0
+
+- name: Webshell — quarantine signature-matched files
+  ansible.builtin.shell: |
+    while IFS= read -r f; do
+      dest="/tmp/webshell_quarantine/$(basename "$f").$(date +%s)"
+      mv "$f" "$dest" && echo "Quarantined: $f -> $dest"
+    done <<< "{{ _webshell_hits.stdout }}"
+  become: true
+  when:
+    - webshell_scan_quarantine
+    - _webshell_hits.stdout | length > 0
+  changed_when: true
+
+# ---------------------------------------------------------------------------
+# 8. Build and display consolidated report
+# ---------------------------------------------------------------------------
+- name: Webshell — build report
+  ansible.builtin.set_fact:
+    _webshell_report: |
+      ============================================================
+      WEBSHELL SCAN REPORT — {{ inventory_hostname }}
+      ============================================================
+
+      [SIGNATURE MATCHES - likely webshells]
+      {{ _webshell_hits.stdout | default('none') }}
+
+      [DOUBLE EXTENSION FILES]
+      {{ _webshell_double_ext.stdout | default('none') }}
+
+      [ELF/SCRIPT BINARIES IN WEBROOT]
+      {{ _webshell_binaries.stdout | default('none') }}
+
+      [RECENTLY MODIFIED PHP FILES]
+      {{ _webshell_recent.stdout | default('none') }}
+
+      [WORLD-WRITABLE PHP FILES]
+      {{ _webshell_writable.stdout | default('none') }}
+
+      [HIDDEN FILES IN WEBROOT]
+      {{ _webshell_hidden.stdout | default('none') }}
+      ============================================================
+
+- name: Webshell — display report
+  ansible.builtin.debug:
+    msg: "{{ _webshell_report.split('\n') }}"
+
+# ---------------------------------------------------------------------------
+# 9. Save report to controller
+# ---------------------------------------------------------------------------
+- name: Webshell — ensure artifact directory exists on controller
+  ansible.builtin.file:
+    path: "{{ webshell_scan_artifact_root }}/webshell_scan"
+    state: directory
+    mode: "0750"
+  delegate_to: localhost
+  become: false
+  run_once: false
+
+- name: Webshell — save report to controller
+  ansible.builtin.copy:
+    content: "{{ _webshell_report }}"
+    dest: "{{ webshell_scan_artifact_root }}/webshell_scan/{{ inventory_hostname }}_webshell_report.txt"
+    mode: "0640"
+  delegate_to: localhost
+  become: false

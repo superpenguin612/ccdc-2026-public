@@ -1,0 +1,121 @@
+---
+# ---------------------------------------------------------------------------
+# 1. Back up main.cf (once)
+# ---------------------------------------------------------------------------
+- name: Postfix — back up main.cf
+  ansible.builtin.copy:
+    src: /etc/postfix/main.cf
+    dest: /etc/postfix/main.cf.ccdc.bak
+    remote_src: true
+    force: false
+    mode: "0644"
+  become: true
+
+# ---------------------------------------------------------------------------
+# 2. Banner / version hiding
+# ---------------------------------------------------------------------------
+- name: Postfix — set SMTP banner (hide version)
+  ansible.builtin.lineinfile:
+    path: /etc/postfix/main.cf
+    regexp: '^#?\s*smtpd_banner\s*='
+    line: "smtpd_banner = $myhostname ESMTP"
+    state: present
+  become: true
+  notify: Reload postfix
+
+# ---------------------------------------------------------------------------
+# 3. Disable VRFY command (user enumeration)
+# ---------------------------------------------------------------------------
+- name: Postfix — disable VRFY command
+  ansible.builtin.lineinfile:
+    path: /etc/postfix/main.cf
+    regexp: '^#?\s*disable_vrfy_command\s*='
+    line: "disable_vrfy_command = yes"
+    state: present
+  become: true
+  notify: Reload postfix
+
+# ---------------------------------------------------------------------------
+# 4. Relay restrictions — prevent open relay
+# ---------------------------------------------------------------------------
+- name: Postfix — restrict mynetworks to localhost only
+  ansible.builtin.lineinfile:
+    path: /etc/postfix/main.cf
+    regexp: '^#?\s*mynetworks\s*='
+    line: "mynetworks = 127.0.0.0/8 [::1]/128"
+    state: present
+  become: true
+  notify: Reload postfix
+
+- name: Postfix — set mynetworks_style to host
+  ansible.builtin.lineinfile:
+    path: /etc/postfix/main.cf
+    regexp: '^#?\s*mynetworks_style\s*='
+    line: "mynetworks_style = host"
+    state: present
+  become: true
+  notify: Reload postfix
+
+- name: Postfix — configure smtpd recipient restrictions
+  ansible.builtin.blockinfile:
+    path: /etc/postfix/main.cf
+    marker: "# {mark} CCDC postfix_harden smtpd_recipient_restrictions"
+    block: |
+      smtpd_recipient_restrictions =
+          permit_mynetworks,
+          permit_sasl_authenticated,
+          reject_unauth_destination
+  become: true
+  notify: Reload postfix
+
+# ---------------------------------------------------------------------------
+# 5. inet_interfaces and inet_protocols
+# ---------------------------------------------------------------------------
+- name: Postfix — set inet_interfaces to all
+  ansible.builtin.lineinfile:
+    path: /etc/postfix/main.cf
+    regexp: '^#?\s*inet_interfaces\s*='
+    line: "inet_interfaces = all"
+    state: present
+  become: true
+  notify: Reload postfix
+
+- name: Postfix — set inet_protocols to ipv4
+  ansible.builtin.lineinfile:
+    path: /etc/postfix/main.cf
+    regexp: '^#?\s*inet_protocols\s*='
+    line: "inet_protocols = ipv4"
+    state: present
+  become: true
+  notify: Reload postfix
+
+# ---------------------------------------------------------------------------
+# 6. Harden config file permissions
+# ---------------------------------------------------------------------------
+- name: Postfix — find all postfix config files
+  ansible.builtin.find:
+    paths: /etc/postfix
+    patterns: "*.cf"
+    recurse: false
+  register: _postfix_cf_files
+  become: true
+
+- name: Postfix — set config file permissions to 640
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    owner: root
+    group: postfix
+    mode: "0640"
+  loop: "{{ _postfix_cf_files.files }}"
+  become: true
+  failed_when: false
+
+# ---------------------------------------------------------------------------
+# 7. Ensure postfix is enabled and running
+# ---------------------------------------------------------------------------
+- name: Postfix — ensure service is enabled and started
+  ansible.builtin.service:
+    name: postfix
+    state: started
+    enabled: true
+  become: true

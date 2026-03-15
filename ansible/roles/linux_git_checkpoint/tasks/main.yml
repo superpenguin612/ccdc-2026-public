@@ -1,0 +1,50 @@
+---
+# ---------------------------------------------------------------------------
+# Install git
+# ---------------------------------------------------------------------------
+- name: Ensure git is installed
+  ansible.builtin.package:
+    name: git
+    state: present
+  become: true
+
+# ---------------------------------------------------------------------------
+# Configure git identity (system-wide, used by root)
+# ---------------------------------------------------------------------------
+- name: Set global user.name
+  ansible.builtin.command: git config --system user.name "{{ linux_git_checkpoint_name }}"
+  become: true
+  changed_when: false
+
+- name: Set global user.email
+  ansible.builtin.command: git config --system user.email "{{ linux_git_checkpoint_email }}"
+  become: true
+  changed_when: false
+
+# ---------------------------------------------------------------------------
+# Checkpoint configured directories (e.g. /etc)
+# ---------------------------------------------------------------------------
+- name: Checkpoint configured dirs
+  ansible.builtin.include_tasks: checkpoint_dir.yml
+  vars:
+    _chk_path: "{{ item.path }}"
+    _chk_gitignore: "{{ item.gitignore | default([]) }}"
+  loop: "{{ linux_git_checkpoint_dirs }}"
+
+# ---------------------------------------------------------------------------
+# Checkpoint extra dirs if they exist (e.g. /var/www)
+# ---------------------------------------------------------------------------
+- name: Stat extra dirs
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  register: _chk_extra_stats
+  loop: "{{ linux_git_checkpoint_extra_dirs }}"
+  become: true
+
+- name: Checkpoint existing extra dirs
+  ansible.builtin.include_tasks: checkpoint_dir.yml
+  vars:
+    _chk_path: "{{ item.item }}"
+    _chk_gitignore: []
+  loop: "{{ _chk_extra_stats.results }}"
+  when: item.stat.exists and item.stat.isdir

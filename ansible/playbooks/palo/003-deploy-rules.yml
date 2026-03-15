@@ -1,0 +1,50 @@
+---
+- name: Set up palo-alto2 tunnel
+  hosts: ubuntu-wkst
+  roles:
+    - palo2_ssh_tunnel
+
+- name: Configure log forwarding to Wazuh
+  hosts: firewalls
+
+  collections:
+    - paloaltonetworks.panos
+
+  roles:
+    - role: palo_log_forwarding
+
+- name: Create address objects
+  hosts: firewalls
+
+  collections:
+    - paloaltonetworks.panos
+
+  roles:
+    - role: palo_configure_address_obj
+
+- name: Create service objects
+  hosts: firewalls
+
+  collections:
+    - paloaltonetworks.panos
+
+  roles:
+    - role: palo_configure_service_obj
+
+- name: Deploy inbound security rules
+  hosts: firewalls
+
+  collections:
+    - paloaltonetworks.panos
+
+  roles:
+    - role: palo_configure_rules
+
+- name: Deploy outbound security rules
+  hosts: firewalls
+
+  collections:
+    - paloaltonetworks.panos
+
+  roles:
+    - role: palo_configure_rules_outbound

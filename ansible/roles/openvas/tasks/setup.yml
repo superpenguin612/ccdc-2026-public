@@ -1,0 +1,55 @@
+---
+# ---------------------------------------------------------------------------
+# First-time GVM setup: create DB, download NVT/SCAP/CERT feeds, set admin pw
+# gvm-setup is idempotent — safe to re-run
+# ---------------------------------------------------------------------------
+
+- name: OpenVAS — check if GVM is already initialized
+  ansible.builtin.stat:
+    path: /var/lib/gvm/CA/cacert.pem
+  register: _gvm_initialized
+
+- name: OpenVAS — run gvm-setup (downloads feeds, ~15-20 min first time)
+  ansible.builtin.command: gvm-setup
+  become: true
+  when: not _gvm_initialized.stat.exists
+  async: 2400    # 40 min max
+  poll: 30
+  register: _gvm_setup_result
+
+- name: OpenVAS — set admin password to vault value
+  ansible.builtin.shell: |
+    runuser -u _gvm -- gvmd --user=admin --new-password='{{ openvas_admin_password }}'
+  become: true
+  no_log: true
+  # gvm-setup creates a random admin password; we override with vault value
+
+- name: OpenVAS — update NVT/SCAP/CERT feeds (if enabled)
+  ansible.builtin.command: gvm-feed-update
+  become: true
+  when: openvas_update_feeds
+  async: 1800    # 30 min max for feed sync
+  poll: 30
+  register: _gvm_feed_update
+  failed_when: false   # non-fatal; scans will use existing feeds if update fails
+
+- name: OpenVAS — start GVM services
+  ansible.builtin.command: gvm-start
+  become: true
+  register: _gvm_start
+  changed_when: "'already running' not in _gvm_start.stdout | default('')"
+  failed_when: false
+
+- name: OpenVAS — wait for gvmd socket to be available
+  ansible.builtin.wait_for:
+    path: /run/gvmd/gvmd.sock
+    state: present
+    timeout: 120
+
+- name: OpenVAS — wait for gsad (web UI) to be listening on 9392
+  ansible.builtin.wait_for:
+    port: 9392
+    host: 127.0.0.1
+    state: started
+    timeout: 60
+  failed_when: false   # gsad may bind on 443 or another port depending on config

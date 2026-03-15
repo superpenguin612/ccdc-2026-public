@@ -1,0 +1,40 @@
+---
+- name: Postfix — ensure backup directory exists on host
+  ansible.builtin.file:
+    path: "{{ linux_backup_root }}/postfix"
+    state: directory
+    mode: "0700"
+    owner: root
+    group: root
+  become: true
+
+- name: Postfix — archive /etc/postfix
+  ansible.builtin.command: >
+    tar -czf {{ linux_backup_root }}/postfix/postfix_config.tar.gz
+    -C / etc/postfix
+  become: true
+
+- name: Postfix — archive /etc/dovecot (if present)
+  ansible.builtin.shell: |
+    [ -d /etc/dovecot ] && tar -czf {{ linux_backup_root }}/postfix/dovecot_config.tar.gz -C / etc/dovecot || true
+  become: true
+
+- name: Postfix — archive mail spool
+  ansible.builtin.command: >
+    tar -czf {{ linux_backup_root }}/postfix/postfix_spool.tar.gz
+    -C / var/spool/postfix
+  become: true
+  failed_when: false
+
+- name: Postfix — archive /var/mail (user mailboxes)
+  ansible.builtin.shell: |
+    [ -d /var/mail ] && tar -czf {{ linux_backup_root }}/postfix/varmail.tar.gz -C / var/mail || true
+  become: true
+  failed_when: false
+
+- name: Postfix — record installed packages
+  ansible.builtin.shell: >
+    rpm -qa | grep -E '^(postfix|dovecot)'
+    > {{ linux_backup_root }}/postfix/mail_packages.txt
+  become: true
+  failed_when: false

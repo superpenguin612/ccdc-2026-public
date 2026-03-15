@@ -1,0 +1,40 @@
+---
+- name: Install chrony (Debian/Ubuntu)
+  ansible.builtin.apt:
+    name: chrony
+    state: present
+    update_cache: true
+  become: true
+  when: ansible_os_family == "Debian"
+
+- name: Install chrony (Fedora/RedHat)
+  ansible.builtin.dnf:
+    name: chrony
+    state: present
+  become: true
+  when: ansible_os_family == "RedHat"
+
+- name: Configure chrony to use pool.ntp.org
+  ansible.builtin.copy:
+    dest: /etc/chrony.conf
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      pool pool.ntp.org iburst maxsources 4
+
+      driftfile /var/lib/chrony/drift
+      makestep 1.0 3
+      rtcsync
+      logdir /var/log/chrony
+  become: true
+  notify:
+    - Restart chrony
+    - Force NTP step sync
+
+- name: Enable and start chrony
+  ansible.builtin.service:
+    name: "{{ 'chronyd' if ansible_os_family == 'RedHat' else 'chrony' }}"
+    enabled: true
+    state: started
+  become: true

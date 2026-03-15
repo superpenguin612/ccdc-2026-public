@@ -1,0 +1,266 @@
+---
+# ---------------------------------------------------------------------------
+# 1. Create splunk user/group
+# ---------------------------------------------------------------------------
+- name: SplunkUF — ensure splunk group exists
+  ansible.builtin.group:
+    name: splunk
+    system: true
+    state: present
+  become: true
+
+- name: SplunkUF — ensure splunk user exists
+  ansible.builtin.user:
+    name: splunk
+    group: splunk
+    home: "{{ install_dir }}"
+    system: true
+    shell: /usr/sbin/nologin
+    create_home: false
+    state: present
+  become: true
+
+# ---------------------------------------------------------------------------
+# 2. Install (only if not already present)
+# ---------------------------------------------------------------------------
+- name: SplunkUF — check if already installed
+  ansible.builtin.stat:
+    path: "{{ install_dir }}/bin/splunk"
+  register: uf_bin
+
+- name: SplunkUF — copy tarball from controller
+  ansible.builtin.copy:
+    src: "{{ installer_tgz_name }}"
+    dest: "{{ installer_dest }}"
+    mode: "0644"
+  when: not uf_bin.stat.exists
+  become: true
+
+- name: SplunkUF — extract tarball
+  ansible.builtin.unarchive:
+    src: "{{ installer_dest }}"
+    dest: "{{ install_dir | dirname }}"
+    remote_src: true
+    creates: "{{ install_dir }}/bin/splunk"
+  when: not uf_bin.stat.exists
+  become: true
+  register: uf_extract
+
+# ---------------------------------------------------------------------------
+# 3. Ownership and config directories
+# ---------------------------------------------------------------------------
+- name: SplunkUF — set install directory ownership
+  ansible.builtin.file:
+    path: "{{ install_dir }}"
+    state: directory
+    owner: splunk
+    group: splunk
+    recurse: true
+  become: true
+
+- name: SplunkUF — ensure local config directory exists
+  ansible.builtin.file:
+    path: "{{ install_dir }}/etc/system/local"
+    state: directory
+    owner: splunk
+    group: splunk
+    mode: "0755"
+  become: true
+
+- name: SplunkUF — ensure apps directory exists
+  ansible.builtin.file:
+    path: "{{ install_dir }}/etc/apps"
+    state: directory
+    owner: splunk
+    group: splunk
+    mode: "0755"
+  become: true
+
+# ---------------------------------------------------------------------------
+# 4. Seed admin credentials on first install
+# ---------------------------------------------------------------------------
+- name: SplunkUF — seed admin credentials (first install only)
+  ansible.builtin.copy:
+    dest: "{{ install_dir }}/etc/system/local/user-seed.conf"
+    owner: splunk
+    group: splunk
+    mode: "0600"
+    content: |
+      [user_info]
+      USERNAME = {{ splunk_user }}
+      PASSWORD = {{ splunk_pass }}
+  when: uf_extract is changed
+  become: true
+  no_log: true
+
+# ---------------------------------------------------------------------------
+# 5. Accept license and do initial start (first install only)
+#    This populates internal DBs; we stop after so systemd manages it.
+# ---------------------------------------------------------------------------
+- name: SplunkUF — accept license and do first start
+  ansible.builtin.command:
+    cmd: "{{ install_dir }}/bin/splunk start --accept-license --answer-yes --no-prompt"
+  when: uf_extract is changed
+  become: true
+  become_user: splunk
+  register: _splunk_first_start
+  failed_when: _splunk_first_start.rc != 0
+
+- name: SplunkUF — stop splunk after license acceptance (systemd takes over)
+  ansible.builtin.command:
+    cmd: "{{ install_dir }}/bin/splunk stop"
+  when: uf_extract is changed
+  become: true
+  become_user: splunk
+  failed_when: false
+
+# ---------------------------------------------------------------------------
+# 6. Deploy configuration files
+# ---------------------------------------------------------------------------
+- name: SplunkUF — deploy outputs.conf (indexer)
+  ansible.builtin.template:
+    src: outputs.conf.j2
+    dest: "{{ install_dir }}/etc/system/local/outputs.conf"
+    owner: splunk
+    group: splunk
+    mode: "0640"
+  become: true
+  notify: Restart splunkforwarder
+
+- name: SplunkUF — deploy server.conf (server name)
+  ansible.builtin.template:
+    src: server.conf.j2
+    dest: "{{ install_dir }}/etc/system/local/server.conf"
+    owner: splunk
+    group: splunk
+    mode: "0640"
+  become: true
+  notify: Restart splunkforwarder
+
+- name: SplunkUF — deploy base Linux inputs.conf
+  ansible.builtin.copy:
+    src: linux-inputs.conf
+    dest: "{{ install_dir }}/etc/system/local/inputs.conf"
+    owner: splunk
+    group: splunk
+    mode: "0640"
+  become: true
+  notify: Restart splunkforwarder
+
+# ---------------------------------------------------------------------------
+# 7. Host-specific inputs
+# ---------------------------------------------------------------------------
+- name: SplunkUF — ensure apache inputs app dir exists
+  ansible.builtin.file:
+    path: "{{ install_dir }}/etc/apps/apache_inputs/local"
+    state: directory
+    owner: splunk
+    group: splunk
+    mode: "0755"
+  become: true
+  when: inventory_hostname in groups['svc_apache2'] | default([])
+
+- name: SplunkUF — deploy Apache inputs.conf
+  ansible.builtin.copy:
+    src: apache-inputs.conf
+    dest: "{{ install_dir }}/etc/apps/apache_inputs/local/inputs.conf"
+    owner: splunk
+    group: splunk
+    mode: "0640"
+  become: true
+  when: inventory_hostname in groups['svc_apache2'] | default([])
+  notify: Restart splunkforwarder
+
+- name: SplunkUF — ensure postfix inputs app dir exists
+  ansible.builtin.file:
+    path: "{{ install_dir }}/etc/apps/postfix_inputs/local"
+    state: directory
+    owner: splunk
+    group: splunk
+    mode: "0755"
+  become: true
+  when: inventory_hostname in groups['svc_postfix'] | default([])
+
+- name: SplunkUF — deploy Postfix/mail inputs.conf
+  ansible.builtin.copy:
+    src: postfix-inputs.conf
+    dest: "{{ install_dir }}/etc/apps/postfix_inputs/local/inputs.conf"
+    owner: splunk
+    group: splunk
+    mode: "0640"
+  become: true
+  when: inventory_hostname in groups['svc_postfix'] | default([])
+  notify: Restart splunkforwarder
+
+# ---------------------------------------------------------------------------
+# 8. Install Technology Add-ons
+# ---------------------------------------------------------------------------
+- name: SplunkUF — ensure TA staging directory exists
+  ansible.builtin.file:
+    path: /tmp/splunk_tas
+    state: directory
+    mode: "0755"
+  become: true
+
+- name: SplunkUF — copy TA archives from controller
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/tmp/splunk_tas/{{ item | basename }}"
+    mode: "0644"
+  loop: "{{ linux_ta_archives }}"
+  become: true
+
+- name: SplunkUF — install TAs into etc/apps
+  ansible.builtin.unarchive:
+    src: "/tmp/splunk_tas/{{ item | basename }}"
+    dest: "{{ install_dir }}/etc/apps"
+    remote_src: true
+    owner: splunk
+    group: splunk
+  loop: "{{ linux_ta_archives }}"
+  become: true
+  notify: Restart splunkforwarder
+
+# ---------------------------------------------------------------------------
+# 9. Deploy and enable systemd unit
+# ---------------------------------------------------------------------------
+- name: SplunkUF — deploy systemd unit file
+  ansible.builtin.template:
+    src: splunkforwarder.service.j2
+    dest: /usr/lib/systemd/system/splunkforwarder.service
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  notify:
+    - Reload systemd
+    - Restart splunkforwarder
+
+- name: SplunkUF — enable splunkforwarder service
+  ansible.builtin.systemd:
+    name: splunkforwarder
+    enabled: true
+    daemon_reload: true
+  become: true
+
+- name: SplunkUF — ensure splunkforwarder is started
+  ansible.builtin.systemd:
+    name: splunkforwarder
+    state: started
+  become: true
+
+# ---------------------------------------------------------------------------
+# 10. Cleanup
+# ---------------------------------------------------------------------------
+- name: SplunkUF — remove installer tarball
+  ansible.builtin.file:
+    path: "{{ installer_dest }}"
+    state: absent
+  when: not uf_bin.stat.exists
+  become: true
+
+- name: SplunkUF — remove TA staging directory
+  ansible.builtin.file:
+    path: /tmp/splunk_tas
+    state: absent
+  become: true

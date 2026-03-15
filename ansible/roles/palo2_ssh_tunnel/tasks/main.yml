@@ -1,0 +1,45 @@
+---
+# Establishes a local SSH tunnel through win11-wkst so the controller can
+# reach palo-alto2 (172.20.240.200:443), which is not directly routable.
+# Tunnel: localhost:8443 → win11-wkst → 172.20.240.200:443
+#
+# Run this role on ubuntu-wkst (ansible_connection=local) before any play
+# that targets palo-alto2.
+
+- name: Ensure ~/.ssh exists
+  ansible.builtin.file:
+    path: ~/.ssh
+    state: directory
+    mode: "0700"
+
+- name: Write vault_ssh_private_key to ~/.ssh/ansible_private_key
+  ansible.builtin.copy:
+    content: "{{ vault_ssh_private_key }}"
+    dest: ~/.ssh/ansible_private_key
+    mode: "0600"
+  no_log: true
+
+- name: Check if palo-alto2 tunnel port is already listening
+  ansible.builtin.shell: ss -tlnp | grep ':8443'
+  register: tunnel_check
+  changed_when: false
+  failed_when: false
+
+- name: Establish SSH tunnel to palo-alto2 via win11-wkst
+  ansible.builtin.shell: >
+    ssh -f -N
+    -L 8443:{{ hostvars['palo-alto2']['ip_internal'] }}:443
+    -p {{ hostvars['win11-wkst']['ansible_port'] | default(2222) }}
+    -i ~/.ssh/ansible_private_key
+    -o StrictHostKeyChecking=no
+    -o ExitOnForwardFailure=yes
+    -o ServerAliveInterval=30
+    {{ hostvars['win11-wkst']['ansible_user'] }}@{{ hostvars['win11-wkst']['ansible_host'] }}
+  when: tunnel_check.rc != 0
+
+- name: Wait for tunnel port to be ready
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: 8443
+    timeout: 15
+  when: tunnel_check.rc != 0

@@ -1,0 +1,32 @@
+---
+- name: Install Wazuh server and configure Splunk indexes
+  hosts: splunk
+  gather_facts: no
+  roles:
+    - wazuh_server
+    - wazuh_custom_rules
+    - wazuh_dashboards
+    - splunk_indexes
+
+- name: Install Wazuh agent on Linux hosts
+  hosts: linux:!splunk
+  gather_facts: yes
+  tags: [agent, linux]
+  roles:
+    - linux_ntp
+    - wazuh_linux
+    - wazuh_linux_logging
+    - wazuh_linux_fim
+    - wazuh_auditd
+
+- name: Install Wazuh agent on Windows hosts
+  hosts: windows
+  gather_facts: yes
+  tags: [agent, windows]
+  roles:
+    - wazuh_windows
+    - win_ntp
+    - wazuh_win_defender
+    - wazuh_sysmon
+    - wazuh_powershell_logging
+    - wazuh_windows_fim

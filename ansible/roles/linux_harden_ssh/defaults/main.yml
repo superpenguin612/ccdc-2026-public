@@ -1,0 +1,3 @@
+---
+# Port pulled from vault (vault_ssh_port) — do not set a plaintext default here
+linux_harden_ssh_port: "{{ vault_ssh_port }}"

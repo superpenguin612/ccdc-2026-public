@@ -1,0 +1,16 @@
+---
+# Real SSH management port — pulled from vault (vault_ssh_port)
+linux_firewall_ssh_port: "{{ vault_ssh_port }}"
+
+# Honeypot port (sshesame) — always port 22, always open
+linux_firewall_honeypot_port: "22"
+
+# Allow ICMP echo inbound (ping — needed for scoring checks)
+linux_firewall_allow_icmp: true
+
+# FTP passive mode port range
+linux_firewall_ftp_passive_start: 49152
+linux_firewall_ftp_passive_end: 65535
+
+# firewalld: zone to use for inbound rules (ccdc = custom drop-by-default zone)
+linux_firewall_zone: ccdc

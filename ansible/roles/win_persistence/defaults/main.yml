@@ -1,0 +1,19 @@
+---
+win_persistence_output_dir: "{{ artifact_root }}/win_persistence"
+
+# Regex patterns for suspicious scheduled task actions (PowerShell -match)
+win_persistence_suspicious_task_pattern: 'powershell|cmd\.exe|wscript|cscript|mshta|rundll32|regsvr32|certutil|bitsadmin|wmic|temp|tmp|appdata|public|downloads|\.vbs|\.js|\.ps1|encoded|bypass|hidden|invoke|iex|downloadstring|webclient'
+
+# Patterns to flag in Registry Run key values
+win_persistence_suspicious_run_pattern: 'temp|tmp|appdata\\roaming|public|downloads|encoded|bypass|\.vbs|\.js|\.ps1|mshta|wscript|cscript|rundll32|regsvr32|certutil|bitsadmin|wmic|powershell.*-|iex|invoke'
+
+# Patterns to flag in non-standard service binary paths
+win_persistence_suspicious_svc_pattern: 'temp|tmp|appdata|public|downloads|\.vbs|\.js|\.ps1|mshta|wscript|cscript|certutil|bitsadmin|powershell.*-e|iex'
+
+# Known-safe service binary path prefixes (these will be excluded from flagging)
+win_persistence_safe_svc_prefixes:
+  - 'C:\Windows\system32\'
+  - 'C:\Windows\SysWow64\'
+  - 'C:\Windows\Microsoft.NET\'
+  - 'C:\Program Files\'
+  - 'C:\Program Files (x86)\'

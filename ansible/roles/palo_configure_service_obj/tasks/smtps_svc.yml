@@ -1,0 +1,8 @@
+---
+- name: Create SMTP TLS port
+  paloaltonetworks.panos.panos_service_object:
+    provider: "{{ panos_provider }}"
+    name: "{{ app_type_mappings.fw_smtp_secure.palo_service[0] }}"
+    protocol: "tcp"
+    destination_port: "{{ app_type_mappings.fw_smtp_secure.ports[0] }}"
+  when: groups['fw_smtp_secure'] | default([]) | length > 0

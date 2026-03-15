@@ -1,0 +1,8 @@
+---
+- name: Configure FIM syscheck block in ossec.conf
+  ansible.builtin.blockinfile:
+    path: 'C:\Program Files (x86)\ossec-agent\ossec.conf'
+    marker: "  <!-- {mark} ANSIBLE MANAGED SYSCHECK -->"
+    insertafter: "<ossec_config>"
+    block: "{{ lookup('template', 'syscheck.xml.j2') }}"
+  notify: Restart wazuh-agent

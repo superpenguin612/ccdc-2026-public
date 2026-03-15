@@ -1,0 +1,360 @@
+---
+# ---------------------------------------------------------------------------
+# UFW — Debian/Ubuntu hosts (ubuntu-ecom, ubuntu-wkst)
+# ---------------------------------------------------------------------------
+
+- name: Install UFW
+  ansible.builtin.apt:
+    name: ufw
+    state: present
+  become: true
+
+# Reset clears all rules and disables UFW — safe to do while SSH session
+# is established because UFW only enforces when enabled at the end.
+- name: Reset UFW to clean slate
+  community.general.ufw:
+    state: reset
+  become: true
+
+- name: Set UFW default policies (deny in, deny out)
+  community.general.ufw:
+    direction: "{{ item.dir }}"
+    policy: "{{ item.policy }}"
+  loop:
+    - { dir: incoming, policy: deny }
+    - { dir: outgoing, policy: deny }
+  become: true
+
+# ---------------------------------------------------------------------------
+# Always-on rules
+# ---------------------------------------------------------------------------
+- name: Allow loopback inbound
+  community.general.ufw:
+    rule: allow
+    interface: lo
+    direction: in
+  become: true
+
+- name: Allow loopback outbound
+  community.general.ufw:
+    rule: allow
+    interface: lo
+    direction: out
+  become: true
+
+# ---------------------------------------------------------------------------
+# Always-on outbound rules (all hosts)
+# ---------------------------------------------------------------------------
+- name: Allow DNS outbound (UDP + TCP 53)
+  community.general.ufw:
+    rule: allow
+    port: "53"
+    proto: "{{ item }}"
+    direction: out
+    comment: "CCDC - DNS out"
+  loop: [tcp, udp]
+  become: true
+
+- name: Allow NTP outbound (UDP 123)
+  community.general.ufw:
+    rule: allow
+    port: "123"
+    proto: udp
+    direction: out
+    comment: "CCDC - NTP out"
+  become: true
+
+- name: Allow HTTP outbound (TCP 80)
+  community.general.ufw:
+    rule: allow
+    port: "80"
+    proto: tcp
+    direction: out
+    comment: "CCDC - HTTP out"
+  become: true
+
+- name: Allow HTTPS outbound (TCP 443)
+  community.general.ufw:
+    rule: allow
+    port: "443"
+    proto: tcp
+    direction: out
+    comment: "CCDC - HTTPS out"
+  become: true
+
+- name: Allow Splunk forwarder outbound (TCP 9997)
+  community.general.ufw:
+    rule: allow
+    port: "9997"
+    proto: tcp
+    direction: out
+    comment: "CCDC - Splunk forwarder out"
+  become: true
+
+- name: Allow Wazuh agent outbound (TCP 1514-1515)
+  community.general.ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: tcp
+    direction: out
+    comment: "CCDC - Wazuh agent out"
+  loop: ["1514", "1515"]
+  become: true
+
+# ---------------------------------------------------------------------------
+# Service-specific outbound rules
+# ---------------------------------------------------------------------------
+
+- name: Allow SMTP outbound (TCP 25 — mail relay)
+  community.general.ufw:
+    rule: allow
+    port: "25"
+    proto: tcp
+    direction: out
+    comment: "CCDC - SMTP out"
+  become: true
+  when: inventory_hostname in groups['fw_smtp']
+
+- name: Allow SSH management outbound (TCP {{ linux_firewall_ssh_port }} — controller to Linux hosts)
+  community.general.ufw:
+    rule: allow
+    port: "{{ linux_firewall_ssh_port }}"
+    proto: tcp
+    direction: out
+    comment: "CCDC - SSH mgmt out"
+  become: true
+  when: inventory_hostname in groups['controller']
+
+- name: Allow SSH default outbound
+  community.general.ufw:
+    rule: allow
+    port: "22"
+    proto: tcp
+    direction: out
+    comment: "CCDC - SSH out"
+  become: true
+  when: inventory_hostname in groups['controller']
+
+- name: Allow WinRM outbound (TCP 5986 — controller to Windows hosts)
+  community.general.ufw:
+    rule: allow
+    port: "5986"
+    proto: tcp
+    direction: out
+    comment: "CCDC - WinRM out"
+  become: true
+  when: inventory_hostname in groups['controller']
+
+- name: Allow service check outbound — controller to scored services
+  community.general.ufw:
+    rule: allow
+    port: "{{ item.port }}"
+    proto: "{{ item.proto }}"
+    direction: out
+    comment: "CCDC - controller svc check {{ item.comment }}"
+  loop:
+    - { port: "25",   proto: tcp, comment: "SMTP (fedora-webmail)" }
+    - { port: "110",  proto: tcp, comment: "POP3 (fedora-webmail)" }
+    - { port: "21",   proto: tcp, comment: "FTP control (server-ftp)" }
+    - { port: "8000", proto: tcp, comment: "Splunk web" }
+    - { port: "55000", proto: tcp, comment: "Wazuh API" }
+  become: true
+  when: inventory_hostname in groups['controller']
+
+- name: Allow SSH management inbound (TCP {{ linux_firewall_ssh_port }})
+  community.general.ufw:
+    rule: allow
+    port: "{{ linux_firewall_ssh_port }}"
+    proto: tcp
+    comment: "CCDC - Ansible SSH Management"
+  become: true
+
+- name: Allow SSH honeypot inbound (TCP {{ linux_firewall_honeypot_port }} — cowrie)
+  community.general.ufw:
+    rule: allow
+    port: "{{ linux_firewall_honeypot_port }}"
+    proto: tcp
+    comment: "CCDC - Cowrie SSH Honeypot"
+  become: true
+
+# ---------------------------------------------------------------------------
+# Service-based rules — keyed on fw_ group membership
+# ---------------------------------------------------------------------------
+
+# --- HTTP ---
+- name: Allow HTTP inbound (TCP 80)
+  community.general.ufw:
+    rule: allow
+    port: "80"
+    proto: tcp
+    comment: "CCDC - HTTP"
+  become: true
+  when: inventory_hostname in groups['fw_http']
+
+# --- HTTPS ---
+- name: Allow HTTPS inbound (TCP 443)
+  community.general.ufw:
+    rule: allow
+    port: "443"
+    proto: tcp
+    comment: "CCDC - HTTPS"
+  become: true
+  when: inventory_hostname in groups['fw_https']
+
+# --- SMTP ---
+- name: Allow SMTP inbound (TCP 25)
+  community.general.ufw:
+    rule: allow
+    port: "25"
+    proto: tcp
+    comment: "CCDC - SMTP"
+  become: true
+  when: inventory_hostname in groups['fw_smtp']
+
+# --- POP3 ---
+- name: Allow POP3 inbound (TCP 110)
+  community.general.ufw:
+    rule: allow
+    port: "110"
+    proto: tcp
+    comment: "CCDC - POP3"
+  become: true
+  when: inventory_hostname in groups['fw_pop3']
+
+# --- IMAP ---
+- name: Allow IMAP inbound (TCP 143)
+  community.general.ufw:
+    rule: allow
+    port: "143"
+    proto: tcp
+    comment: "CCDC - IMAP"
+  become: true
+  when: inventory_hostname in groups['fw_imap']
+
+# --- FTP ---
+- name: Allow FTP control inbound (TCP 21)
+  community.general.ufw:
+    rule: allow
+    port: "21"
+    proto: tcp
+    comment: "CCDC - FTP Control"
+  become: true
+  when: inventory_hostname in groups['fw_ftp']
+
+- name: Allow FTP active data inbound (TCP 20)
+  community.general.ufw:
+    rule: allow
+    port: "20"
+    proto: tcp
+    comment: "CCDC - FTP Active Data"
+  become: true
+  when: inventory_hostname in groups['fw_ftp']
+
+- name: Allow FTP passive data inbound (TCP {{ linux_firewall_ftp_passive_start }}:{{ linux_firewall_ftp_passive_end }})
+  community.general.ufw:
+    rule: allow
+    port: "{{ linux_firewall_ftp_passive_start }}:{{ linux_firewall_ftp_passive_end }}"
+    proto: tcp
+    comment: "CCDC - FTP Passive Data"
+  become: true
+  when: inventory_hostname in groups['fw_ftp']
+
+# --- DNS ---
+- name: Allow DNS inbound (TCP + UDP 53)
+  community.general.ufw:
+    rule: allow
+    port: "53"
+    proto: "{{ item }}"
+    comment: "CCDC - DNS"
+  loop: [tcp, udp]
+  become: true
+  when: inventory_hostname in groups['fw_dns']
+
+# --- Splunk ---
+- name: Allow Splunk web inbound (TCP 8000)
+  community.general.ufw:
+    rule: allow
+    port: "8000"
+    proto: tcp
+    comment: "CCDC - Splunk Web"
+  become: true
+  when: inventory_hostname in groups['fw_splunk']
+
+- name: Allow Splunk forwarder inbound (TCP 9997)
+  community.general.ufw:
+    rule: allow
+    port: "9997"
+    proto: tcp
+    comment: "CCDC - Splunk Forwarder"
+  become: true
+  when: inventory_hostname in groups['fw_splunk']
+
+# --- NTP ---
+- name: Allow NTP inbound (UDP 123)
+  community.general.ufw:
+    rule: allow
+    port: "123"
+    proto: udp
+    comment: "CCDC - NTP"
+  become: true
+  when: inventory_hostname in groups['fw_ntp']
+
+# --- TFTP ---
+- name: Allow TFTP inbound (UDP 69)
+  community.general.ufw:
+    rule: allow
+    port: "69"
+    proto: udp
+    comment: "CCDC - TFTP"
+  become: true
+  when: inventory_hostname in groups['fw_tftp']
+
+# --- Wazuh ---
+- name: Allow Wazuh agent comms inbound (TCP 1514-1515)
+  community.general.ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: tcp
+    comment: "CCDC - Wazuh Agent"
+  loop: ["1514", "1515"]
+  become: true
+  when: inventory_hostname in groups['fw_wazuh']
+
+- name: Allow Wazuh web UI inbound (TCP 443)
+  community.general.ufw:
+    rule: allow
+    port: "443"
+    proto: tcp
+    comment: "CCDC - Wazuh Web"
+  become: true
+  when: inventory_hostname in groups['fw_wazuh']
+
+- name: Allow syslog inbound from Palo Alto (UDP 514)
+  community.general.ufw:
+    rule: allow
+    port: "514"
+    proto: udp
+    comment: "CCDC - Palo Syslog to Wazuh"
+  become: true
+  when: inventory_hostname in groups['fw_wazuh']
+
+# ---------------------------------------------------------------------------
+# Enable UFW
+# ---------------------------------------------------------------------------
+- name: Enable UFW
+  ansible.builtin.command: ufw --force enable
+  become: true
+  async: 10
+  poll: 0
+  changed_when: false
+
+- name: Wait for UFW to finish enabling
+  ansible.builtin.wait_for:
+    host: "{{ ansible_host }}"
+    port: "{{ linux_firewall_ssh_port }}"
+    state: started
+    delay: 2
+    timeout: 30
+  delegate_to: localhost
+  become: false
+  when: inventory_hostname not in groups['controller']

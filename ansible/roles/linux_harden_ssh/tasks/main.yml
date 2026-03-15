@@ -1,0 +1,272 @@
+---
+# Hardens SSH on Linux hosts:
+#  - Installs the vault SSH key for the azul user
+#  - Restricts SSH access to azul user only (AllowUsers)
+#  - Disables password authentication
+#  - Validates config before reloading to avoid lockout
+#  - Removes authorized_keys from all other user accounts
+#  - Verifies connection still works after reload
+
+- set_fact:
+    ssh_user: "{{ vault_new_credentials[inventory_hostname].user }}"
+  no_log: true
+
+- name: Gather service facts to detect SSH service name
+  ansible.builtin.service_facts:
+
+- name: Set SSH service name fact
+  ansible.builtin.set_fact:
+    ssh_service_name: "{{ 'ssh' if 'ssh.service' in ansible_facts.services else 'sshd' }}"
+
+# service_facts doesn't enumerate socket units — use systemctl directly
+- name: Mask and stop SSH sockets so sshd service owns the port
+  ansible.builtin.shell: |
+    for unit in ssh.socket sshd.socket; do
+      if systemctl list-units --all --no-legend "$unit" 2>/dev/null | grep -q "$unit"; then
+        systemctl stop "$unit" 2>/dev/null || true
+        systemctl disable "$unit" 2>/dev/null || true
+        systemctl mask "$unit" 2>/dev/null || true
+      fi
+    done
+  become: yes
+
+- name: Ensure SSH service is enabled and started (not socket-activated)
+  ansible.builtin.systemd:
+    name: "{{ ssh_service_name }}"
+    state: started
+    enabled: true
+  become: yes
+
+- name: Remove all sshd_config.d drop-in files
+  ansible.builtin.find:
+    paths: /etc/ssh/sshd_config.d
+    patterns: "*.conf"
+  become: yes
+  register: sshd_config_d_files
+
+- name: Ensure local artifact directory exists for sshd_config.d backups
+  ansible.builtin.file:
+    path: "{{ artifact_root }}/linux_harden_ssh/{{ inventory_hostname }}/sshd_config.d"
+    state: directory
+    mode: "0700"
+  delegate_to: localhost
+  become: false
+  when: sshd_config_d_files.files | length > 0
+
+- name: Back up sshd_config.d drop-ins to controller before deletion
+  ansible.builtin.fetch:
+    src: "{{ item.path }}"
+    dest: "{{ artifact_root }}/linux_harden_ssh/{{ inventory_hostname }}/sshd_config.d/{{ item.path | basename }}"
+    flat: true
+  become: yes
+  loop: "{{ sshd_config_d_files.files }}"
+  when: sshd_config_d_files.files | length > 0
+
+- name: Delete sshd_config.d drop-ins
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  become: yes
+  loop: "{{ sshd_config_d_files.files }}"
+
+- name: Find all SSH persistence files in user home dirs
+  ansible.builtin.find:
+    paths: /home
+    patterns:
+      - authorized_keys2
+      - rc
+      - environment
+    recurse: yes
+    hidden: yes
+  become: yes
+  register: ssh_persistence_home
+
+- name: Find all SSH persistence files in /root
+  ansible.builtin.find:
+    paths: /root/.ssh
+    patterns:
+      - authorized_keys2
+      - rc
+      - environment
+    hidden: yes
+  become: yes
+  register: ssh_persistence_root
+  ignore_errors: yes
+
+- name: Ensure local artifact directory exists for SSH persistence file backups
+  ansible.builtin.file:
+    path: "{{ artifact_root }}/linux_harden_ssh/{{ inventory_hostname }}/persistence"
+    state: directory
+    mode: "0700"
+  delegate_to: localhost
+  become: false
+  when: (ssh_persistence_home.files + ssh_persistence_root.files) | length > 0
+
+- name: Back up SSH persistence files to controller before deletion
+  ansible.builtin.fetch:
+    src: "{{ item.path }}"
+    dest: "{{ artifact_root }}/linux_harden_ssh/{{ inventory_hostname }}/persistence/{{ item.path | dirname | dirname | basename }}__{{ item.path | basename }}"
+    flat: true
+  become: yes
+  loop: "{{ ssh_persistence_home.files + ssh_persistence_root.files }}"
+  when: (ssh_persistence_home.files + ssh_persistence_root.files) | length > 0
+
+- name: Remove SSH persistence files
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  become: yes
+  loop: "{{ ssh_persistence_home.files + ssh_persistence_root.files }}"
+
+- name: Install vault SSH public key for {{ ssh_user }}
+  ansible.posix.authorized_key:
+    user: "{{ ssh_user }}"
+    key: "{{ vault_ssh_public_key }}"
+    exclusive: yes
+    state: present
+  become: yes
+
+- name: Backup original sshd_config (remote)
+  ansible.builtin.copy:
+    src: /etc/ssh/sshd_config
+    dest: /etc/ssh/sshd_config.ccdc.bak
+    remote_src: yes
+    force: false
+  become: yes
+
+- name: Ensure local artifact directory exists for sshd_config backup
+  ansible.builtin.file:
+    path: "{{ artifact_root }}/linux_harden_ssh/{{ inventory_hostname }}"
+    state: directory
+    mode: "0700"
+  delegate_to: localhost
+  become: false
+
+- name: Pull original sshd_config to controller
+  ansible.builtin.fetch:
+    src: /etc/ssh/sshd_config
+    dest: "{{ artifact_root }}/linux_harden_ssh/{{ inventory_hostname }}/sshd_config.original"
+    flat: true
+  become: yes
+
+# Open vault SSH port in whichever firewall is active before sshd moves to it
+- name: Open vault SSH port in UFW (Ubuntu/Debian)
+  community.general.ufw:
+    rule: allow
+    port: "{{ linux_harden_ssh_port }}"
+    proto: tcp
+    comment: "CCDC - Ansible SSH Management"
+  become: yes
+  when: ansible_facts.packages is defined and 'ufw' in ansible_facts.packages
+  ignore_errors: yes
+
+- name: Open vault SSH port in firewalld (Fedora/RHEL) — runtime rule
+  ansible.builtin.command: firewall-cmd --add-port={{ linux_harden_ssh_port }}/tcp
+  become: yes
+  when: ansible_facts.services['firewalld.service'] is defined and
+        ansible_facts.services['firewalld.service'].state == 'running'
+  changed_when: false
+  ignore_errors: yes
+
+- name: Open vault SSH port in firewalld (Fedora/RHEL) — permanent rule
+  ansible.builtin.command: firewall-cmd --permanent --add-port={{ linux_harden_ssh_port }}/tcp
+  become: yes
+  when: ansible_facts.services['firewalld.service'] is defined and
+        ansible_facts.services['firewalld.service'].state == 'running'
+  changed_when: false
+  ignore_errors: yes
+
+- name: Replace sshd_config with hardened config
+  ansible.builtin.template:
+    src: sshd_config.j2
+    dest: /etc/ssh/sshd_config
+    owner: root
+    group: root
+    mode: '0600'
+  become: yes
+  notify: Reload sshd
+
+- name: Validate sshd config before applying
+  ansible.builtin.command: sshd -t
+  become: yes
+  changed_when: false
+  retries: 3
+
+- name: Kill all SSH sessions and restart service
+  ansible.builtin.shell: |
+    nohup bash -c 'sleep 3 && pkill -TERM -x sshd; sleep 1 && systemctl start {{ ssh_service_name }}' > /dev/null 2>&1 &
+    disown
+  become: yes
+  failed_when: false
+  changed_when: false
+  when: "'controller' not in group_names"
+
+- name: Pause for 7 seconds to allow SSH to restart
+  ansible.builtin.pause:
+    seconds: 7
+  when: "'controller' not in group_names"
+
+- name: Wait for SSH to come back up on port {{ linux_harden_ssh_port }}
+  ansible.builtin.wait_for:
+    host: "{{ ansible_host }}"
+    port: "{{ linux_harden_ssh_port }}"
+    state: started
+    delay: 2
+    timeout: 60
+  delegate_to: localhost
+  become: no
+  when: "'controller' not in group_names"
+
+- name: Switch ansible_port to new SSH port for remainder of play
+  ansible.builtin.set_fact:
+    ansible_port: "{{ linux_harden_ssh_port }}"
+  when: "'controller' not in group_names"
+
+- name: Reset SSH connection to reconnect on new port
+  ansible.builtin.meta: reset_connection
+
+- name: Verify SSH connection still works
+  ansible.builtin.ping:
+  become: false
+
+- name: Find all authorized_keys files on the system
+  ansible.builtin.find:
+    paths:
+      - /home
+      - /root
+    patterns: authorized_keys
+    recurse: yes
+    hidden: yes
+  become: yes
+  register: all_authorized_keys
+
+- name: Ensure local artifact directory exists for {{ inventory_hostname }}
+  ansible.builtin.file:
+    path: "{{ artifact_root }}/linux_harden_ssh/{{ inventory_hostname }}/authorized_keys"
+    state: directory
+    mode: "0700"
+  delegate_to: localhost
+  become: false
+  when: all_authorized_keys.files | length > 0
+
+- name: Pull authorized_keys files to controller before removal
+  ansible.builtin.fetch:
+    src: "{{ item.path }}"
+    dest: "{{ artifact_root }}/linux_harden_ssh/{{ inventory_hostname }}/authorized_keys/{{ item.path | dirname | dirname | basename }}/authorized_keys"
+    flat: true
+  become: yes
+  loop: "{{ all_authorized_keys.files }}"
+  when:
+    - ('/' + ssh_user + '/') not in item.path
+    - item.size > 0
+
+- name: Remove authorized_keys from all accounts except {{ ssh_user }}
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  become: yes
+  loop: "{{ all_authorized_keys.files }}"
+  when: ('/' + ssh_user + '/') not in item.path
+
+# NOTE: Port 22 honeypot is handled by the sshesame_honeypot role.
+# Run sshesame_honeypot after this role to deploy sshesame on port 22 + auto-ban.

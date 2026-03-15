@@ -1,0 +1,7 @@
+---
+
+- name: Verify scored services from workstations
+  hosts: ubuntu-wkst:win11-wkst
+  gather_facts: true
+  roles:
+    - service_verify

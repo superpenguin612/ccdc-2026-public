@@ -1,0 +1,45 @@
+---
+# --- Dangerous function blocking ---
+# Matches the established CCDC list from the checklist.
+# curl_exec/curl_multi_exec are blocked — OpenCart uses PHP's curl via cURL
+# extension directly (not these wrappers), so this is safe.
+php_harden_disable_functions: >-
+  exec,passthru,shell_exec,system,proc_open,popen,
+  curl_exec,curl_multi_exec,parse_ini_file,show_source,pcntl_exec
+
+# --- Information disclosure ---
+php_harden_expose_php: "Off"
+php_harden_display_errors: "Off"
+php_harden_display_startup_errors: "Off"
+php_harden_log_errors: "On"
+
+# --- Remote file inclusion ---
+php_harden_allow_url_fopen: "Off"
+php_harden_allow_url_include: "Off"
+
+# --- Deprecated but set defensively ---
+php_harden_register_globals: "Off"
+
+# --- File uploads ---
+# Off per checklist — set to On in host_vars if the scored service requires it
+php_harden_file_uploads: "Off"
+php_harden_upload_max_filesize: "10M"
+php_harden_post_max_size: "10M"
+
+# --- Resource limits ---
+php_harden_max_execution_time: "30"
+php_harden_max_input_time: "30"
+php_harden_memory_limit: "256M"
+
+# --- open_basedir: restrict PHP file access to web root + tmp + sessions ---
+# Set to empty string "" to disable (not recommended)
+php_harden_open_basedir: "/var/www/html:/tmp:/var/lib/php/sessions"
+
+# --- Session hardening ---
+php_harden_session_cookie_httponly: "1"
+php_harden_session_use_only_cookies: "1"
+php_harden_session_cookie_secure: "1"
+php_harden_session_cookie_samesite: "Strict"
+php_harden_session_use_strict_mode: "1"
+# Regenerate session ID on every N requests (0 = off)
+php_harden_session_gc_maxlifetime: "1440"

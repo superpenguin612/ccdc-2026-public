@@ -1,0 +1,251 @@
+<!-- CCDC custom Wazuh detection rules -->
+<!-- Rule IDs in range 1000000+ (above wazuh-rules community repo range) -->
+<group name="ccdc,redteam,">
+
+  <!-- ======================================================================
+       Authentication / Brute Force
+       ====================================================================== -->
+
+  <!-- Brute force: 10+ SSH failures in 60s from same source -->
+  <rule id="1000001" level="12" frequency="10" timeframe="60">
+    <if_matched_sid>5716</if_matched_sid>
+    <description>CCDC: SSH brute force attack (10+ failures in 60s)</description>
+    <group>authentication_failures,pci_dss_10.2.4,pci_dss_10.2.5,</group>
+  </rule>
+
+  <!-- Brute force: 10+ Windows auth failures in 60s -->
+  <rule id="1000002" level="12" frequency="10" timeframe="60">
+    <if_matched_sid>60122</if_matched_sid>
+    <description>CCDC: Windows brute force attack (10+ failures in 60s)</description>
+    <group>authentication_failures,</group>
+  </rule>
+
+  <!-- New local admin account created on Windows -->
+  <rule id="1000010" level="14">
+    <if_sid>60144</if_sid>
+    <description>CCDC: New Windows local administrator account created</description>
+    <group>account_changes,</group>
+  </rule>
+
+  <!-- User added to local Administrators group -->
+  <rule id="1000011" level="14">
+    <if_sid>60148</if_sid>
+    <field name="win.eventdata.targetUserName" type="pcre2">(?i)administrators</field>
+    <description>CCDC: User added to local Administrators group</description>
+    <group>account_changes,</group>
+  </rule>
+
+  <!-- ======================================================================
+       Persistence / Scheduled Tasks / Cron
+       ====================================================================== -->
+
+  <!-- New scheduled task created (Windows) -->
+  <rule id="1000020" level="12">
+    <if_sid>60009</if_sid>
+    <field name="win.system.eventID">^4698$</field>
+    <description>CCDC: New scheduled task created - possible persistence</description>
+    <group>windows,persistence,</group>
+  </rule>
+
+  <!-- Scheduled task modified (Windows) -->
+  <rule id="1000021" level="10">
+    <if_sid>60009</if_sid>
+    <field name="win.system.eventID">^4702$</field>
+    <description>CCDC: Scheduled task modified</description>
+    <group>windows,persistence,</group>
+  </rule>
+
+  <!-- Cron job modified on Linux -->
+  <rule id="1000022" level="10">
+    <if_sid>591</if_sid>
+    <match>/etc/cron|/var/spool/cron|/etc/anacrontab</match>
+    <description>CCDC: Cron configuration modified - possible persistence</description>
+    <group>linux,persistence,</group>
+  </rule>
+
+  <!-- New service installed (Windows) -->
+  <rule id="1000023" level="12">
+    <if_sid>60009</if_sid>
+    <field name="win.system.eventID">^7045$</field>
+    <description>CCDC: New Windows service installed - possible persistence</description>
+    <group>windows,persistence,</group>
+  </rule>
+
+  <!-- ======================================================================
+       Lateral Movement / Credential Theft Tools
+       ====================================================================== -->
+
+  <!-- Mimikatz patterns in process command line -->
+  <rule id="1000030" level="15">
+    <if_sid>61603,92024</if_sid>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)(mimikatz|sekurlsa|lsadump|kerberos::|privilege::debug|token::elevate)</field>
+    <description>CCDC: Mimikatz or credential dump tool detected</description>
+    <group>windows,attack,credential_theft,</group>
+  </rule>
+
+  <!-- PowerShell encoded command (common obfuscation) -->
+  <rule id="1000031" level="12">
+    <if_sid>61603,92024</if_sid>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)powershell.*(-enc|-encodedcommand|-e\s+[A-Za-z0-9+/=]{20,})</field>
+    <description>CCDC: PowerShell encoded command - possible obfuscation</description>
+    <group>windows,attack,</group>
+  </rule>
+
+  <!-- PowerShell download cradle patterns -->
+  <rule id="1000032" level="12">
+    <if_sid>61603,92024</if_sid>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)(IEX|Invoke-Expression|DownloadString|WebClient|Net\.WebRequest|bitsadmin.*transfer)</field>
+    <description>CCDC: PowerShell download cradle detected - possible remote code execution</description>
+    <group>windows,attack,</group>
+  </rule>
+
+  <!-- BloodHound/SharpHound LDAP enumeration -->
+  <rule id="1000033" level="12">
+    <if_sid>61603,92024</if_sid>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)(bloodhound|sharphound|invoke-bloodhound|CollectionMethod)</field>
+    <description>CCDC: BloodHound/SharpHound AD enumeration detected</description>
+    <group>windows,attack,</group>
+  </rule>
+
+  <!-- ======================================================================
+       Reverse Shells / Command & Control
+       ====================================================================== -->
+
+  <!-- Bash reverse shell patterns (Linux) -->
+  <rule id="1000040" level="15">
+    <if_sid>5500,5501</if_sid>
+    <match>bash -i|/dev/tcp/|nc -e|ncat -e|python.*socket.*connect|perl.*socket</match>
+    <description>CCDC: Linux reverse shell pattern detected</description>
+    <group>linux,attack,shell,</group>
+  </rule>
+
+  <!-- netcat listener or reverse shell on Windows -->
+  <rule id="1000041" level="15">
+    <if_sid>61603,92024</if_sid>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)(nc\.exe.*-e|ncat.*-e|netcat.*-e|cmd\.exe.*-e|powershell.*-nop.*-w\s+hidden)</field>
+    <description>CCDC: Windows reverse shell command detected</description>
+    <group>windows,attack,shell,</group>
+  </rule>
+
+  <!-- ======================================================================
+       Log Tampering / Defense Evasion
+       ====================================================================== -->
+
+  <!-- Windows event log cleared -->
+  <rule id="1000050" level="14">
+    <if_sid>60009</if_sid>
+    <field name="win.system.eventID">^1102$|^104$</field>
+    <description>CCDC: Windows event log cleared - possible evidence destruction</description>
+    <group>windows,attack,log_clear,</group>
+  </rule>
+
+  <!-- auditd stopped or disabled on Linux -->
+  <rule id="1000051" level="13">
+    <if_sid>591</if_sid>
+    <match>auditd</match>
+    <description>CCDC: auditd service stopped or modified</description>
+    <group>linux,attack,log_clear,</group>
+  </rule>
+
+  <!-- Wazuh agent stopped -->
+  <rule id="1000052" level="14">
+    <if_group>ossec</if_group>
+    <match>ossec: Agent disconnected</match>
+    <description>CCDC: Wazuh agent disconnected - possible tampering</description>
+    <group>attack,</group>
+  </rule>
+
+  <!-- ======================================================================
+       File Integrity — Sensitive Files
+       ====================================================================== -->
+
+  <!-- /etc/passwd or /etc/shadow modified -->
+  <rule id="1000060" level="13">
+    <if_sid>550,554</if_sid>
+    <match>/etc/passwd|/etc/shadow|/etc/sudoers|/etc/group</match>
+    <description>CCDC: Critical Linux auth file modified</description>
+    <group>linux,fim,</group>
+  </rule>
+
+  <!-- SSH authorized_keys modified -->
+  <rule id="1000061" level="13">
+    <if_sid>550,554</if_sid>
+    <match>authorized_keys</match>
+    <description>CCDC: SSH authorized_keys modified - possible backdoor</description>
+    <group>linux,fim,</group>
+  </rule>
+
+  <!-- Web root modified (defacement detection) -->
+  <rule id="1000062" level="12">
+    <if_sid>550,554</if_sid>
+    <match>/var/www|C:\inetpub</match>
+    <description>CCDC: Web root file modified - possible defacement</description>
+    <group>fim,web,</group>
+  </rule>
+
+  <!-- ======================================================================
+       Network / Firewall
+       ====================================================================== -->
+
+  <!-- Windows Firewall disabled -->
+  <rule id="1000070" level="14">
+    <if_sid>60009</if_sid>
+    <field name="win.system.eventID">^2003$</field>
+    <description>CCDC: Windows Firewall profile changed/disabled</description>
+    <group>windows,attack,</group>
+  </rule>
+
+  <!-- Multiple outbound connections to unusual ports (port scan / C2 beacon) -->
+  <rule id="1000071" level="10" frequency="20" timeframe="30">
+    <if_matched_sid>4112</if_matched_sid>
+    <description>CCDC: High rate outbound connections - possible C2 beacon or port scan</description>
+    <group>network,attack,</group>
+  </rule>
+
+  <!-- ======================================================================
+       sshesame SSH Honeypot
+       Log format: JSON. Fields decoded natively by Wazuh (log_format json).
+       Match on event_type field from the JSON payload.
+       ====================================================================== -->
+
+  <!-- New TCP connection to honeypot (event_type: connection) -->
+  <rule id="1000080" level="8">
+    <field name="log_source">^sshesame$</field>
+    <field name="event_type">^connection$</field>
+    <description>CCDC: sshesame honeypot - new SSH connection from $(source)</description>
+    <group>honeypot,</group>
+  </rule>
+
+  <!-- Password auth attempt (event_type: password_auth) -->
+  <rule id="1000081" level="10">
+    <field name="log_source">^sshesame$</field>
+    <field name="event_type">^password_auth$</field>
+    <description>CCDC: sshesame honeypot - password auth attempt from $(source)</description>
+    <group>honeypot,authentication_failed,</group>
+  </rule>
+
+  <!-- No-auth probe (event_type: no_auth) — scanning tools -->
+  <rule id="1000083" level="6">
+    <field name="log_source">^sshesame$</field>
+    <field name="event_type">^no_auth$</field>
+    <description>CCDC: sshesame honeypot - SSH probe (no auth) from $(source)</description>
+    <group>honeypot,</group>
+  </rule>
+
+  <!-- Attacker typed commands in fake shell (event_type: session_input) -->
+  <rule id="1000084" level="10">
+    <field name="log_source">^sshesame$</field>
+    <field name="event_type">^session_input$</field>
+    <description>CCDC: sshesame honeypot - attacker shell input from $(source)</description>
+    <group>honeypot,</group>
+  </rule>
+
+  <!-- Brute force: 5+ password auth attempts from same source in 30s -->
+  <rule id="1000082" level="14" frequency="5" timeframe="30">
+    <if_matched_sid>1000081</if_matched_sid>
+    <same_field>source</same_field>
+    <description>CCDC: sshesame honeypot - brute force (5+ attempts in 30s) from $(source)</description>
+    <group>honeypot,authentication_failures,</group>
+  </rule>
+
+</group>

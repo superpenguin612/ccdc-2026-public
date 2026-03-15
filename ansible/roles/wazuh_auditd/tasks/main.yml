@@ -1,0 +1,23 @@
+---
+- name: Install auditd
+  ansible.builtin.package:
+    name: "{{ 'audit' if ansible_facts.os_family == 'RedHat' else 'auditd' }}"
+    state: present
+  become: true
+
+- name: Deploy audit.rules
+  ansible.builtin.copy:
+    src: audit.rules
+    dest: /etc/audit/rules.d/audit.rules
+    owner: root
+    group: root
+    mode: "0640"
+  become: true
+  notify: Reload auditd rules
+
+- name: Ensure auditd is enabled and running
+  ansible.builtin.service:
+    name: auditd
+    state: started
+    enabled: true
+  become: true

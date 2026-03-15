@@ -1,0 +1,12 @@
+---
+- name: OpenVAS — install packages
+  ansible.builtin.include_tasks: install.yml
+
+- name: OpenVAS — initial setup and feed sync
+  ansible.builtin.include_tasks: setup.yml
+
+- name: OpenVAS — configure credentials, targets, and scan tasks
+  ansible.builtin.include_tasks: configure.yml
+
+- name: OpenVAS — start scans
+  ansible.builtin.include_tasks: scan.yml

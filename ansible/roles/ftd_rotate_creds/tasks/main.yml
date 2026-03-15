@@ -1,0 +1,27 @@
+---
+# Rotates the FTD admin user password via the FTD REST API.
+# Requires the tunnel to be up (run ssh_tunnel_ftd role on ubuntu-wkst first).
+
+- name: Get list of users
+  ftd_configuration:
+    operation: getUserList
+    register_as: ftd_users
+
+- name: Find admin user object
+  set_fact:
+    ftd_admin_user: "{{ ftd_users | selectattr('name', 'equalto', host_defaults['cisco-ftd'].user) | first }}"
+
+- name: Rotate FTD admin password
+  ftd_configuration:
+    operation: upsertUser
+    data:
+      id: "{{ ftd_admin_user.id }}"
+      version: "{{ ftd_admin_user.version }}"
+      identitySourceId: "{{ ftd_admin_user.identitySourceId }}"
+      userServiceTypes: "{{ ftd_admin_user.userServiceTypes }}"
+      userPreferences: "{{ ftd_admin_user.userPreferences }}"
+      userRole: "{{ ftd_admin_user.userRole }}"
+      type: "{{ ftd_admin_user.type }}"
+      name: "{{ ftd_admin_user.name }}"
+      password: "{{ host_defaults['cisco-ftd'].password }}"
+      newPassword: "{{ vault_new_credentials['cisco-ftd'].password }}"

@@ -1,0 +1,44 @@
+---
+- name: Disable screen lock timeout (screensaver)
+  win_regedit:
+    path: HKCU:\Software\Policies\Microsoft\Windows\Control Panel\Desktop
+    name: ScreenSaveActive
+    data: "0"
+    type: string
+    state: present
+
+- name: Disable screensaver lock
+  win_regedit:
+    path: HKCU:\Software\Policies\Microsoft\Windows\Control Panel\Desktop
+    name: ScreenSaverIsSecure
+    data: "0"
+    type: string
+    state: present
+
+- name: Set screensaver timeout to 0
+  win_regedit:
+    path: HKCU:\Software\Policies\Microsoft\Windows\Control Panel\Desktop
+    name: ScreenSaveTimeOut
+    data: "0"
+    type: string
+    state: present
+
+- name: Disable lock screen on idle via power settings (AC)
+  win_command: powercfg /change standby-timeout-ac 0
+
+- name: Disable lock screen on idle via power settings (DC)
+  win_command: powercfg /change standby-timeout-dc 0
+
+- name: Disable monitor timeout (AC)
+  win_command: powercfg /change monitor-timeout-ac 0
+
+- name: Disable monitor timeout (DC)
+  win_command: powercfg /change monitor-timeout-dc 0
+
+- name: Disable machine inactivity limit (prevents auto-lock)
+  win_regedit:
+    path: HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System
+    name: InactivityTimeoutSecs
+    data: 0
+    type: dword
+    state: present

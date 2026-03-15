@@ -1,0 +1,22 @@
+---
+_creds: "{{ host_defaults[inventory_hostname] if (use_default_creds | default(false)) else (vault_new_credentials | default({}))[inventory_hostname] }}"
+
+ansible_user:             "{{ _creds.user }}"
+ansible_password:         "{{ _creds.password if (use_default_creds | default(false)) else '' }}"
+ansible_ssh_private_key_file: ~/.ssh/ansible_private_key
+ansible_connection: ssh
+ansible_python_interpreter: /usr/bin/python3
+# SSH port — value stored in vault (vault_ssh_port)
+ansible_port: "{{ vault_ssh_port }}"
+
+ansible_become: yes
+ansible_become_method: sudo
+ansible_become_password: "{{ _creds.password }}"
+
+upstream_firewall: palo-alto
+
+linux_sudo_group: sudo
+
+wazuh_manager: "{{ hostvars['splunk']['ip_internal'] }}"
+wazuh_agent_name: "{{ inventory_hostname }}"
+wazuh_agent_group: "linux"

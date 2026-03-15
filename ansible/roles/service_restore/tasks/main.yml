@@ -1,0 +1,28 @@
+---
+- name: Restore Apache webroot and config
+  ansible.builtin.include_tasks: apache.yml
+  when: inventory_hostname in groups['svc_apache2']
+
+- name: Restore MySQL databases
+  ansible.builtin.include_tasks: mysql.yml
+  when: inventory_hostname in groups['svc_mysql']
+
+- name: Restore Postfix config and spool
+  ansible.builtin.include_tasks: postfix.yml
+  when: inventory_hostname in groups['svc_postfix']
+
+- name: Restore Splunk config
+  ansible.builtin.include_tasks: splunk.yml
+  when: inventory_hostname in groups['svc_splunk']
+
+- name: Restore IIS webroot and config
+  ansible.builtin.include_tasks: iis.yml
+  when: inventory_hostname in groups['svc_iis']
+
+- name: Restore IIS FTP root
+  ansible.builtin.include_tasks: iis_ftp.yml
+  when: inventory_hostname in groups['svc_iis_ftp']
+
+- name: Restore DNS zone files
+  ansible.builtin.include_tasks: dns.yml
+  when: inventory_hostname in groups['svc_dns']

@@ -1,0 +1,111 @@
+---
+# =============================================================================
+# win_clamav — Install ClamAV on Windows hosts
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# 1. Check if already installed
+# ---------------------------------------------------------------------------
+- name: ClamAV — check if already installed
+  ansible.windows.win_stat:
+    path: "{{ clamav_install_dir }}\\clamscan.exe"
+  register: _clamav_bin
+
+# ---------------------------------------------------------------------------
+# 2. Download and install MSI
+# ---------------------------------------------------------------------------
+- name: ClamAV — download MSI from clamav.net
+  ansible.windows.win_get_url:
+    url: "{{ clamav_msi_url }}"
+    dest: "C:\\Windows\\Temp\\{{ clamav_msi_name }}"
+  when: not _clamav_bin.stat.exists
+
+- name: ClamAV — install via MSI
+  ansible.windows.win_package:
+    path: "C:\\Windows\\Temp\\{{ clamav_msi_name }}"
+    arguments: /quiet /norestart INSTALLDIR="{{ clamav_install_dir }}"
+    state: present
+  when: not _clamav_bin.stat.exists
+
+# ---------------------------------------------------------------------------
+# 3. Deploy clamd.conf and freshclam.conf
+# ---------------------------------------------------------------------------
+- name: ClamAV — deploy clamd.conf
+  ansible.windows.win_copy:
+    content: |
+      # ClamAV daemon config — managed by Ansible
+      LogFile {{ clamav_install_dir }}\clamd.log
+      LogTime yes
+      DatabaseDirectory {{ clamav_install_dir }}\database
+      LocalSocket {{ clamav_install_dir }}\clamd.sock
+    dest: "{{ clamav_install_dir }}\\clamd.conf"
+
+- name: ClamAV — deploy freshclam.conf
+  ansible.windows.win_copy:
+    content: |
+      # Freshclam config — managed by Ansible
+      DatabaseDirectory {{ clamav_install_dir }}\database
+      DatabaseMirror database.clamav.net
+      LogFileMaxSize 2M
+      LogTime yes
+      LogFile {{ clamav_install_dir }}\freshclam.log
+    dest: "{{ clamav_install_dir }}\\freshclam.conf"
+
+# ---------------------------------------------------------------------------
+# 4. Create database directory
+# ---------------------------------------------------------------------------
+- name: ClamAV — ensure database directory exists
+  ansible.windows.win_file:
+    path: "{{ clamav_install_dir }}\\database"
+    state: directory
+
+# ---------------------------------------------------------------------------
+# 5. Update virus definitions
+# ---------------------------------------------------------------------------
+- name: ClamAV — update virus definitions
+  ansible.windows.win_shell: |
+    & "{{ clamav_install_dir }}\freshclam.exe" --config-file="{{ clamav_install_dir }}\freshclam.conf"
+    if ($LASTEXITCODE -le 1) { Write-Output "Definitions updated" }
+  when: clamav_update_signatures
+  register: _clamav_update
+  failed_when: false
+  changed_when: "'updated' in (_clamav_update.stdout | default(''))"
+
+# ---------------------------------------------------------------------------
+# 6. Create quarantine directory
+# ---------------------------------------------------------------------------
+- name: ClamAV — create quarantine directory
+  ansible.windows.win_file:
+    path: "{{ clamav_quarantine_dir }}"
+    state: directory
+
+# ---------------------------------------------------------------------------
+# 7. Run initial scan (optional)
+# ---------------------------------------------------------------------------
+- name: ClamAV — run initial scan
+  ansible.windows.win_shell: |
+    $dirs = @({{ clamav_scan_dirs | map('quote') | join(', ') }})
+    foreach ($d in $dirs) {
+      if (Test-Path $d) {
+        & "{{ clamav_install_dir }}\clamscan.exe" -r --move="{{ clamav_quarantine_dir }}" --log="{{ clamav_install_dir }}\scan.log" $d
+      }
+    }
+    Get-Content "{{ clamav_install_dir }}\scan.log" -Tail 10
+  when: clamav_initial_scan
+  async: 600
+  poll: 30
+  register: _clamav_scan
+  failed_when: false
+
+- name: ClamAV — display scan results
+  ansible.builtin.debug:
+    msg: "{{ _clamav_scan.stdout_lines | default(['Scan not run']) }}"
+  when: clamav_initial_scan
+
+# ---------------------------------------------------------------------------
+# 8. Cleanup installer
+# ---------------------------------------------------------------------------
+- name: ClamAV — remove installer MSI
+  ansible.windows.win_file:
+    path: "C:\\Windows\\Temp\\{{ clamav_msi_name }}"
+    state: absent

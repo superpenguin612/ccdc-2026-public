@@ -1,0 +1,119 @@
+---
+# =============================================================================
+# linux_clamav — Install and configure ClamAV on Linux hosts
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# 1. Detect package manager
+# ---------------------------------------------------------------------------
+- name: ClamAV — detect OS family
+  ansible.builtin.setup:
+    filter: ansible_os_family
+  when: ansible_os_family is not defined
+
+- name: ClamAV — set package names (Debian/Ubuntu)
+  ansible.builtin.set_fact:
+    _clamav_packages:
+      - clamav
+      - clamav-daemon
+      - clamav-freshclam
+    _clamav_daemon_name: clamav-daemon
+    _clamav_freshclam_name: clamav-freshclam
+  when: ansible_os_family == "Debian"
+
+- name: ClamAV — set package names (RedHat/Fedora)
+  ansible.builtin.set_fact:
+    _clamav_packages:
+      - clamav
+      - clamd
+      - clamav-update
+    _clamav_daemon_name: clamd@scan
+    _clamav_freshclam_name: clamav-freshclam
+  when: ansible_os_family == "RedHat"
+
+# ---------------------------------------------------------------------------
+# 2. Install ClamAV
+# ---------------------------------------------------------------------------
+- name: ClamAV — install packages (apt)
+  ansible.builtin.apt:
+    name: "{{ _clamav_packages }}"
+    state: present
+    update_cache: true
+  become: true
+  when: ansible_os_family == "Debian"
+
+- name: ClamAV — install packages (dnf)
+  ansible.builtin.dnf:
+    name: "{{ _clamav_packages }}"
+    state: present
+  become: true
+  when: ansible_os_family == "RedHat"
+
+# ---------------------------------------------------------------------------
+# 3. Update virus definitions
+# ---------------------------------------------------------------------------
+- name: ClamAV — stop freshclam service before manual update
+  ansible.builtin.service:
+    name: "{{ _clamav_freshclam_name }}"
+    state: stopped
+  become: true
+  failed_when: false
+  when: clamav_update_signatures
+
+- name: ClamAV — update virus definitions
+  ansible.builtin.command: freshclam
+  become: true
+  when: clamav_update_signatures
+  register: _clamav_freshclam
+  failed_when: false  # may fail if no internet or already up to date
+  changed_when: "'Database updated' in _clamav_freshclam.stdout | default('')"
+
+- name: ClamAV — start freshclam service
+  ansible.builtin.service:
+    name: "{{ _clamav_freshclam_name }}"
+    state: started
+    enabled: true
+  become: true
+  failed_when: false
+
+# ---------------------------------------------------------------------------
+# 4. Enable and start ClamAV daemon
+# ---------------------------------------------------------------------------
+- name: ClamAV — enable and start daemon
+  ansible.builtin.service:
+    name: "{{ _clamav_daemon_name }}"
+    state: started
+    enabled: true
+  become: true
+
+# ---------------------------------------------------------------------------
+# 5. Create quarantine directory
+# ---------------------------------------------------------------------------
+- name: ClamAV — create quarantine directory
+  ansible.builtin.file:
+    path: "{{ clamav_quarantine_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  become: true
+
+# ---------------------------------------------------------------------------
+# 6. Run initial scan (optional)
+# ---------------------------------------------------------------------------
+- name: ClamAV — run initial scan
+  ansible.builtin.command: >
+    clamscan -r --move={{ clamav_quarantine_dir }}
+    --log=/var/log/clamav-initial-scan.log
+    {{ clamav_scan_dirs | join(' ') }}
+  become: true
+  when: clamav_initial_scan
+  async: 600
+  poll: 30
+  register: _clamav_scan
+  failed_when: false  # clamscan returns 1 if infections found
+
+- name: ClamAV — display scan results
+  ansible.builtin.debug:
+    msg: "{{ _clamav_scan.stdout_lines | default(['Scan not run']) }}"
+  when: clamav_initial_scan

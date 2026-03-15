@@ -1,0 +1,26 @@
+---
+- name: Apache — stop service before restore
+  ansible.builtin.service:
+    name: apache2
+    state: stopped
+  become: true
+  failed_when: false
+
+- name: Apache — wipe and restore webroot from local backup
+  ansible.builtin.shell: |
+    rm -rf {{ svc_apache2_webroot }}
+    tar -xzf {{ linux_backup_root }}/apache/apache_webroot.tar.gz -C /
+  become: true
+
+- name: Apache — wipe and restore /etc/apache2 from local backup
+  ansible.builtin.shell: |
+    rm -rf /etc/apache2
+    tar -xzf {{ linux_backup_root }}/apache/apache_config.tar.gz -C /
+  become: true
+
+- name: Apache — start service
+  ansible.builtin.service:
+    name: apache2
+    state: started
+    enabled: true
+  become: true

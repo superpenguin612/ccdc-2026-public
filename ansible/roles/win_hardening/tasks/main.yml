@@ -1,0 +1,306 @@
+---
+- name: Disable SMBv1 server support
+  ansible.windows.win_regedit:
+    path: HKLM:\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters
+    name: SMB1
+    data: 0
+    type: dword
+    state: present
+  when: windows_hardening_disable_smb1
+
+- name: Disable SMBv1 client driver
+  ansible.windows.win_regedit:
+    path: HKLM:\SYSTEM\CurrentControlSet\Services\mrxsmb10
+    name: Start
+    data: 4
+    type: dword
+    state: present
+  when: windows_hardening_disable_smb1
+
+- name: Require SMB signing on the server
+  ansible.windows.win_regedit:
+    path: HKLM:\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters
+    name: "{{ item.name }}"
+    data: "{{ item.data }}"
+    type: dword
+    state: present
+  loop:
+    - { name: EnableSecuritySignature, data: 1 }
+    - { name: RequireSecuritySignature, data: 1 }
+  when: windows_hardening_require_smb_signing
+
+- name: Require SMB signing on the client
+  ansible.windows.win_regedit:
+    path: HKLM:\SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters
+    name: "{{ item.name }}"
+    data: "{{ item.data }}"
+    type: dword
+    state: present
+  loop:
+    - { name: EnableSecuritySignature, data: 1 }
+    - { name: RequireSecuritySignature, data: 1 }
+  when: windows_hardening_require_smb_signing
+
+- name: Disable insecure SMB guest logons
+  ansible.windows.win_regedit:
+    path: HKLM:\SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters
+    name: AllowInsecureGuestAuth
+    data: 0
+    type: dword
+    state: present
+  when: windows_hardening_disable_insecure_guest_logons
+
+- name: Disable Print Spooler
+  ansible.windows.win_service:
+    name: Spooler
+    state: stopped
+    start_mode: disabled
+  when: windows_hardening_disable_print_spooler
+
+- name: Disable Remote Registry
+  ansible.windows.win_service:
+    name: RemoteRegistry
+    state: stopped
+    start_mode: disabled
+  when: windows_hardening_disable_remote_registry
+
+- name: Disable additional unnecessary/dangerous services
+  ansible.windows.win_service:
+    name: "{{ item }}"
+    state: stopped
+    start_mode: disabled
+  loop: "{{ windows_hardening_disable_services }}"
+  failed_when: false  # service may not exist on all Windows SKUs
+
+- name: Disable PowerShell v2 engine when present
+  ansible.windows.win_shell: |
+    $featureNames = @('MicrosoftWindowsPowerShellV2', 'MicrosoftWindowsPowerShellV2Root')
+    $changed = $false
+    foreach ($featureName in $featureNames) {
+      $feature = Get-WindowsOptionalFeature -Online -FeatureName $featureName -ErrorAction SilentlyContinue
+      if ($null -ne $feature -and $feature.State -ne 'Disabled') {
+        Disable-WindowsOptionalFeature -Online -FeatureName $featureName -NoRestart | Out-Null
+        $changed = $true
+      }
+    }
+    if ($changed) {
+      Write-Output 'changed'
+    }
+  register: powershell_v2_disable
+  changed_when: "'changed' in powershell_v2_disable.stdout"
+  when: windows_hardening_disable_powershell_v2
+
+- name: Disable WDigest credential caching
+  ansible.windows.win_regedit:
+    path: HKLM:\SYSTEM\CurrentControlSet\Control\SecurityProviders\WDigest
+    name: UseLogonCredential
+    data: 0
+    type: dword
+    state: present
+  when: windows_hardening_disable_wdigest
+
+- name: Disable LM hash storage
+  ansible.windows.win_regedit:
+    path: HKLM:\SYSTEM\CurrentControlSet\Control\Lsa
+    name: NoLMHash
+    data: 1
+    type: dword
+    state: present
+  when: windows_hardening_disable_lm_hash
+
+- name: Restrict anonymous enumeration
+  ansible.windows.win_regedit:
+    path: HKLM:\SYSTEM\CurrentControlSet\Control\Lsa
+    name: "{{ item.name }}"
+    data: "{{ item.data }}"
+    type: dword
+    state: present
+  loop:
+    - { name: RestrictAnonymous, data: 1 }
+    - { name: RestrictAnonymousSAM, data: 1 }
+    - { name: EveryoneIncludesAnonymous, data: 0 }
+  when: windows_hardening_restrict_anonymous
+
+- name: Disable LLMNR
+  ansible.windows.win_regedit:
+    path: HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient
+    name: EnableMulticast
+    data: 0
+    type: dword
+    state: present
+  when: windows_hardening_disable_llmnr
+
+- name: Disable AutoRun for all drives
+  ansible.windows.win_regedit:
+    path: HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer
+    name: NoDriveTypeAutoRun
+    data: 255
+    type: dword
+    state: present
+  when: windows_hardening_disable_autorun
+
+# --- Mimikatz / Credential Theft Mitigations ---
+
+- name: Enable LSA Protection (RunAsPPL) to block LSASS memory reads
+  ansible.windows.win_regedit:
+    path: HKLM:\SYSTEM\CurrentControlSet\Control\Lsa
+    name: RunAsPPL
+    data: 1
+    type: dword
+    state: present
+  when: windows_hardening_enable_lsa_protection
+
+- name: Enable Credential Guard pre-requisites (DeviceGuard)
+  ansible.windows.win_regedit:
+    path: "{{ item.path }}"
+    name: "{{ item.name }}"
+    data: "{{ item.data }}"
+    type: dword
+    state: present
+  loop:
+    - { path: 'HKLM:\SYSTEM\CurrentControlSet\Control\DeviceGuard', name: EnableVirtualizationBasedSecurity, data: 1 }
+    - { path: 'HKLM:\SYSTEM\CurrentControlSet\Control\DeviceGuard', name: RequirePlatformSecurityFeatures, data: 1 }
+    - { path: 'HKLM:\SYSTEM\CurrentControlSet\Control\DeviceGuard', name: HypervisorEnforcedCodeIntegrity, data: 1 }
+    - { path: 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa', name: LsaCfgFlags, data: 1 }
+  when: windows_hardening_enable_credential_guard
+
+- name: Disable NTLM v1 (force NTLMv2 minimum)
+  ansible.windows.win_regedit:
+    path: HKLM:\SYSTEM\CurrentControlSet\Control\Lsa
+    name: LmCompatibilityLevel
+    data: 5
+    type: dword
+    state: present
+  when: windows_hardening_disable_ntlmv1
+
+- name: Require NTLMv2 session security on client and server
+  ansible.windows.win_regedit:
+    path: HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\MSV1_0
+    name: "{{ item.name }}"
+    data: "{{ item.data }}"
+    type: dword
+    state: present
+  loop:
+    - { name: NtlmMinClientSec, data: 537395200 }
+    - { name: NtlmMinServerSec, data: 537395200 }
+  when: windows_hardening_disable_ntlmv1
+
+# breaks FTP
+# - name: Disable unconstrained NTLM outbound (block NTLM relay)
+#   ansible.windows.win_regedit:
+#     path: HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\MSV1_0
+#     name: RestrictReceivingNTLMTraffic
+#     data: 2
+#     type: dword
+#     state: present
+#   when: windows_hardening_restrict_ntlm
+
+- name: Limit cached domain logons (reduce credential exposure)
+  ansible.windows.win_regedit:
+    path: HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon
+    name: CachedLogonsCount
+    data: "1"
+    type: string
+    state: present
+  when: windows_hardening_limit_cached_logons
+
+- name: Disable WPAD (prevent WPAD-based credential capture)
+  ansible.windows.win_regedit:
+    path: HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Internet Settings\WinHttp
+    name: DisableWpad
+    data: 1
+    type: dword
+    state: present
+  when: windows_hardening_disable_wpad
+
+- name: Disable NetBIOS name resolution (prevents NBNS poisoning)
+  ansible.windows.win_shell: |
+    $changed = $false
+    Get-WmiObject Win32_NetworkAdapterConfiguration | Where-Object { $_.IPEnabled -eq $true } | ForEach-Object {
+      if ($_.TcpipNetbiosOptions -ne 2) {
+        $_.SetTcpipNetbios(2) | Out-Null
+        $changed = $true
+      }
+    }
+    if ($changed) { Write-Output 'changed' }
+  register: netbios_disable
+  changed_when: "'changed' in netbios_disable.stdout"
+  when: windows_hardening_disable_netbios
+
+- name: Disable mDNS (prevents mDNS poisoning alongside LLMNR)
+  ansible.windows.win_regedit:
+    path: HKLM:\SYSTEM\CurrentControlSet\Services\Dnscache\Parameters
+    name: EnableMDNS
+    data: 0
+    type: dword
+    state: present
+  when: windows_hardening_disable_mdns
+
+- name: Block remote SAM access (prevents remote user enumeration)
+  ansible.windows.win_regedit:
+    path: HKLM:\SYSTEM\CurrentControlSet\Control\Lsa
+    name: RestrictRemoteSAM
+    data: "O:BAG:BAD:(A;;RC;;;BA)"
+    type: string
+    state: present
+  when: windows_hardening_restrict_remote_sam
+
+- name: Disable RDP if not needed (attack surface reduction)
+  ansible.windows.win_regedit:
+    path: HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server
+    name: fDenyTSConnections
+    data: 1
+    type: dword
+    state: present
+  when: windows_hardening_disable_rdp
+
+- name: Disable WScript and CScript (prevent VBScript/JScript malware)
+  ansible.windows.win_shell: |
+    $changed = $false
+    $keys = @(
+      'HKLM:\SOFTWARE\Microsoft\Windows Script Host\Settings',
+      'HKCU:\SOFTWARE\Microsoft\Windows Script Host\Settings'
+    )
+    foreach ($key in $keys) {
+      if (-not (Test-Path $key)) { New-Item -Path $key -Force | Out-Null }
+      $val = (Get-ItemProperty -Path $key -Name Enabled -ErrorAction SilentlyContinue).Enabled
+      if ($val -ne 0) {
+        Set-ItemProperty -Path $key -Name Enabled -Value 0 -Type DWord
+        $changed = $true
+      }
+    }
+    if ($changed) { Write-Output 'changed' }
+  register: wscript_disable
+  changed_when: "'changed' in wscript_disable.stdout"
+  when: windows_hardening_disable_wscript
+
+- name: Enable UAC and require admin approval for all elevation
+  ansible.windows.win_regedit:
+    path: HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System
+    name: "{{ item.name }}"
+    data: "{{ item.data }}"
+    type: dword
+    state: present
+  loop:
+    - { name: EnableLUA, data: 1 }
+    - { name: ConsentPromptBehaviorAdmin, data: 2 }
+    - { name: ConsentPromptBehaviorUser, data: 3 }
+    - { name: PromptOnSecureDesktop, data: 1 }
+  when: windows_hardening_enforce_uac
+
+- name: Enforce Netlogon protections on domain controllers
+  ansible.windows.win_regedit:
+    path: HKLM:\SYSTEM\CurrentControlSet\Services\Netlogon\Parameters
+    name: "{{ item.name }}"
+    data: "{{ item.data }}"
+    type: dword
+    state: present
+  loop:
+    - { name: FullSecureChannelProtection, data: 1 }
+    - { name: RequireSignOrSeal, data: 1 }
+    - { name: SealSecureChannel, data: 1 }
+    - { name: SignSecureChannel, data: 1 }
+    - { name: RequireStrongKey, data: 1 }
+  when:
+    - windows_hardening_enforce_dc_netlogon_protection
+    - inventory_hostname in groups['domain_controllers']

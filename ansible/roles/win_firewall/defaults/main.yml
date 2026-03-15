@@ -1,0 +1,16 @@
+---
+# Profiles to apply the default-block-inbound policy to
+win_firewall_profiles:
+  - Domain
+  - Private
+  - Public
+
+# Always allow management SSH on this port regardless of fw_ groups
+win_firewall_mgmt_ssh_port: "{{ windows_ssh_port }}"
+
+# Allow ICMP echo (ping) inbound — needed for scoring checks
+win_firewall_allow_icmp: true
+
+# FTP passive mode port range (for server-ftp passive data connections)
+win_firewall_ftp_passive_start: 49152
+win_firewall_ftp_passive_end: 65535

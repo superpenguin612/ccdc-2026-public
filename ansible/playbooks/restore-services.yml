@@ -1,0 +1,6 @@
+---
+- name: Restore all service data
+  hosts: linux:windows
+  gather_facts: true
+  roles:
+    - service_restore

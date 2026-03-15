@@ -1,0 +1,11 @@
+---
+- name: Create External Address Object
+  paloaltonetworks.panos.panos_address_object:
+    provider: "{{ panos_provider }}"
+    name: "External_{{ hostvars[host_item]['inventory_hostname'] }}"
+    value: "{{ hostvars[host_item]['ip_external'] }}"
+  loop: "{{ groups[protected_group] | default([]) }}"
+  loop_control:
+    loop_var: host_item
+  when:
+    - hostvars[host_item]['ip_external'] is defined

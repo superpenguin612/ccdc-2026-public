@@ -1,0 +1,18 @@
+<!-- CCDC custom Wazuh decoders -->
+<decoder_list>
+
+  <!-- ==================================================================
+       sshesame SSH honeypot decoders
+       sshesame logs JSON lines. Wazuh auto-decodes all fields via
+       log_format json in the localfile config. The label key="source"
+       adds source=sshesame to every event so rules can match on it.
+
+       Decoded fields available in rules:
+         log_source  - "sshesame" (from localfile label key="log_source")
+         event_type  - "no_auth" | "password_auth" | "connection" |
+                       "session_input" | "session_close" | "connection_close"
+         source      - attacker IP:port (from JSON field)
+       No custom decoder needed — JSON is handled natively.
+       ================================================================== -->
+
+</decoder_list>

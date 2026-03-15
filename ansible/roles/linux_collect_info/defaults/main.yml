@@ -1,0 +1,2 @@
+---
+collect_output_dir: "{{ artifact_root }}/linux_collect_info/{{ inventory_hostname }}"

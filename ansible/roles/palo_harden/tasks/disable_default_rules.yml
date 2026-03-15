@@ -1,0 +1,39 @@
+---
+- name: Get Existing Rules List
+  paloaltonetworks.panos.panos_security_rule:
+    provider: "{{ panos_provider }}"
+    gathered_filter: "*"
+    state: gathered
+  register: palo_facts
+
+- name: Disable Existing Rules
+  paloaltonetworks.panos.panos_security_rule:
+    provider: "{{ panos_provider }}"
+    rule_name: "{{ item }}"
+    disabled: true
+  loop: "{{ palo_facts.gathered | map(attribute='rule_name') | reject('match', '^intrazone-default$|^interzone-default$') | list }}"
+  when: palo_facts.gathered | default([]) | length > 0
+
+- name: Set intrazone-default Rule Action to Allow
+  paloaltonetworks.panos.panos_type_cmd:
+    provider: "{{ panos_provider }}"
+    xpath: |
+      /config/devices/entry[@name='localhost.localdomain']/vsys/entry[@name='vsys1']
+      /rulebase/default-security-rules/rules/entry[@name='intrazone-default']
+    cmd: edit
+    element:
+      <entry name="intrazone-default"><action>allow</action><log-end>no</log-end></entry>
+      
+
+- name: Set interzone-default Rule Action to Deny
+  paloaltonetworks.panos.panos_type_cmd:
+    provider: "{{ panos_provider }}"
+    xpath: |
+      /config/devices/entry[@name='localhost.localdomain']/vsys/entry[@name='vsys1']
+      /rulebase/default-security-rules/rules/entry[@name='interzone-default']
+    cmd: edit
+    element:
+      <entry name="interzone-default"><action>deny</action><log-end>yes</log-end></entry>
+      
+      
+      

@@ -1,0 +1,6 @@
+---
+- name: Dockerize OpenCart
+  hosts: ubuntu-ecom
+  gather_facts: false
+  roles:
+    - opencart_dockerize

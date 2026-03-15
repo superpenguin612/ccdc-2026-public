@@ -1,0 +1,3 @@
+---
+# Local controller path for all collected artifacts, backups, and exports.
+artifact_root: "{{ lookup('env', 'HOME') }}/ccdc26/artifacts"

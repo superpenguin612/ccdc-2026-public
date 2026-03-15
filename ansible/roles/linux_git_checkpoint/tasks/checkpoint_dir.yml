@@ -1,0 +1,46 @@
+---
+# Called with: _chk_path, _chk_gitignore
+# Creates a git checkpoint (init + initial commit) in _chk_path if one doesn't already exist.
+
+- name: "Check if {{ _chk_path }} is already a repo"
+  ansible.builtin.stat:
+    path: "{{ _chk_path }}/.git"
+  register: _chk_git_dir
+  become: true
+
+- name: "Write .gitignore in {{ _chk_path }}"
+  ansible.builtin.copy:
+    content: "{{ _chk_gitignore | join('\n') }}\n"
+    dest: "{{ _chk_path }}/.gitignore"
+    owner: root
+    group: root
+    mode: "0600"
+  become: true
+  when:
+    - not _chk_git_dir.stat.exists
+    - _chk_gitignore | length > 0
+
+- name: "Git init in {{ _chk_path }}"
+  ansible.builtin.command:
+    cmd: git init
+    chdir: "{{ _chk_path }}"
+  become: true
+  when: not _chk_git_dir.stat.exists
+
+- name: "Git add -A in {{ _chk_path }}"
+  ansible.builtin.command:
+    cmd: git add -A
+    chdir: "{{ _chk_path }}"
+  become: true
+  changed_when: false
+  when: not _chk_git_dir.stat.exists
+
+- name: "Initial commit in {{ _chk_path }}"
+  ansible.builtin.command:
+    cmd: 'git commit -m "ccdc: initial checkpoint"'
+    chdir: "{{ _chk_path }}"
+  become: true
+  register: _chk_commit
+  changed_when: "'nothing to commit' not in _chk_commit.stdout"
+  failed_when: false
+  when: not _chk_git_dir.stat.exists

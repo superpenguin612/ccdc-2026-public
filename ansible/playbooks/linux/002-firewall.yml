@@ -1,0 +1,6 @@
+---
+- name: Apply firewall configuration
+  hosts: linux
+  gather_facts: true
+  roles:
+    - linux_firewall

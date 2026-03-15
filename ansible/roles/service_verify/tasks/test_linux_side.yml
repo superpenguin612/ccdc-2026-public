@@ -1,0 +1,143 @@
+---
+# =============================================================================
+# Tests run on win11-wkst (Windows/PowerShell) targeting Linux-side services.
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# ubuntu-ecom — HTTP
+# ---------------------------------------------------------------------------
+
+- name: "Test ubuntu-ecom HTTP ({{ svc_verify_ecom_http_host }}:{{ svc_verify_ecom_http_port }})"
+  ansible.windows.win_shell: |
+    try {
+        $r = Invoke-WebRequest -Uri "http://{{ svc_verify_ecom_http_host }}:{{ svc_verify_ecom_http_port }}{{ svc_verify_ecom_http_path }}" `
+            -UseBasicParsing -TimeoutSec {{ svc_verify_ecom_http_timeout_sec }} -ErrorAction Stop
+        if ($r.StatusCode -ge 200 -and $r.StatusCode -lt 500) {
+            Write-Output "PASS:HTTP $($r.StatusCode)"
+        } else {
+            Write-Output "FAIL:HTTP $($r.StatusCode)"
+        }
+    } catch {
+        Write-Output "FAIL:$($_.Exception.Message)"
+    }
+  register: _verify_ecom_http
+  changed_when: false
+  failed_when: false
+  when: svc_verify_ecom_http_enabled
+
+- name: "Result — ubuntu-ecom HTTP"
+  ansible.builtin.fail:
+    msg: "ubuntu-ecom HTTP: {{ _verify_ecom_http.stdout | default('SKIP') | trim }}"
+  when: svc_verify_ecom_http_enabled and (_verify_ecom_http.stdout | default('') | trim) is search('^FAIL')
+  ignore_errors: true
+
+# ---------------------------------------------------------------------------
+# fedora-webmail — SMTP (check TCP connect + 220 banner)
+# ---------------------------------------------------------------------------
+- name: "Test fedora-webmail SMTP ({{ svc_verify_smtp_host }}:{{ svc_verify_smtp_port }})"
+  ansible.windows.win_shell: |
+    try {
+        $tcp = New-Object System.Net.Sockets.TcpClient
+        $ar  = $tcp.BeginConnect("{{ svc_verify_smtp_host }}", {{ svc_verify_smtp_port }}, $null, $null)
+        $ok  = $ar.AsyncWaitHandle.WaitOne({{ svc_verify_smtp_timeout_sec * 1000 }})
+        if (-not $ok) { $tcp.Close(); Write-Output "FAIL:connection timed out"; exit }
+        $tcp.EndConnect($ar)
+        $stream = $tcp.GetStream()
+        $stream.ReadTimeout = {{ svc_verify_smtp_timeout_sec * 1000 }}
+        $buf = New-Object byte[] 1024
+        $n   = $stream.Read($buf, 0, $buf.Length)
+        $banner = [System.Text.Encoding]::ASCII.GetString($buf, 0, $n).Trim()
+        $tcp.Close()
+        if ($banner -match "^220") {
+            Write-Output "PASS:$banner"
+        } else {
+            Write-Output "FAIL:unexpected banner: $banner"
+        }
+    } catch {
+        Write-Output "FAIL:$($_.Exception.Message)"
+    }
+  register: _verify_smtp
+  changed_when: false
+  failed_when: false
+  when: svc_verify_smtp_enabled
+
+- name: "Result — fedora-webmail SMTP"
+  ansible.builtin.fail:
+    msg: "fedora-webmail SMTP: {{ _verify_smtp.stdout | default('SKIP') | trim }}"
+  when: svc_verify_smtp_enabled and (_verify_smtp.stdout | default('') | trim) is search('^FAIL')
+  ignore_errors: true
+
+# ---------------------------------------------------------------------------
+# fedora-webmail — POP3 (check TCP connect + +OK banner)
+# ---------------------------------------------------------------------------
+- name: "Test fedora-webmail POP3 ({{ svc_verify_pop3_host }}:{{ svc_verify_pop3_port }})"
+  ansible.windows.win_shell: |
+    try {
+        $tcp = New-Object System.Net.Sockets.TcpClient
+        $ar  = $tcp.BeginConnect("{{ svc_verify_pop3_host }}", {{ svc_verify_pop3_port }}, $null, $null)
+        $ok  = $ar.AsyncWaitHandle.WaitOne({{ svc_verify_pop3_timeout_sec * 1000 }})
+        if (-not $ok) { $tcp.Close(); Write-Output "FAIL:connection timed out"; exit }
+        $tcp.EndConnect($ar)
+        $stream = $tcp.GetStream()
+        $stream.ReadTimeout = {{ svc_verify_pop3_timeout_sec * 1000 }}
+        $buf = New-Object byte[] 1024
+        $n   = $stream.Read($buf, 0, $buf.Length)
+        $banner = [System.Text.Encoding]::ASCII.GetString($buf, 0, $n).Trim()
+        $tcp.Close()
+        if ($banner -match "^\+OK") {
+            Write-Output "PASS:$banner"
+        } else {
+            Write-Output "FAIL:unexpected banner: $banner"
+        }
+    } catch {
+        Write-Output "FAIL:$($_.Exception.Message)"
+    }
+  register: _verify_pop3
+  changed_when: false
+  failed_when: false
+  when: svc_verify_pop3_enabled
+
+- name: "Result — fedora-webmail POP3"
+  ansible.builtin.fail:
+    msg: "fedora-webmail POP3: {{ _verify_pop3.stdout | default('SKIP') | trim }}"
+  when: svc_verify_pop3_enabled and (_verify_pop3.stdout | default('') | trim) is search('^FAIL')
+  ignore_errors: true
+
+# ---------------------------------------------------------------------------
+# splunk — Splunk Web UI HTTP
+# ---------------------------------------------------------------------------
+- name: "Test Splunk Web ({{ svc_verify_splunk_host }}:{{ svc_verify_splunk_port }})"
+  ansible.windows.win_shell: |
+    try {
+        # Splunk redirects to /en-US/account/login — allow redirects, any non-5xx is a pass
+        $r = Invoke-WebRequest -Uri "http://{{ svc_verify_splunk_host }}:{{ svc_verify_splunk_port }}{{ svc_verify_splunk_path }}" `
+            -UseBasicParsing -TimeoutSec {{ svc_verify_splunk_timeout_sec }} -MaximumRedirection 5 -ErrorAction Stop
+        if ($r.StatusCode -ge 200 -and $r.StatusCode -lt 500) {
+            Write-Output "PASS:HTTP $($r.StatusCode)"
+        } else {
+            Write-Output "FAIL:HTTP $($r.StatusCode)"
+        }
+    } catch {
+        Write-Output "FAIL:$($_.Exception.Message)"
+    }
+  register: _verify_splunk
+  changed_when: false
+  failed_when: false
+  when: svc_verify_splunk_enabled
+
+- name: "Result — Splunk Web"
+  ansible.builtin.fail:
+    msg: "Splunk Web (port {{ svc_verify_splunk_port }}): {{ _verify_splunk.stdout | default('SKIP') | trim }}"
+  when: svc_verify_splunk_enabled and (_verify_splunk.stdout | default('') | trim) is search('^FAIL')
+  ignore_errors: true
+
+# ---------------------------------------------------------------------------
+# Summary (Linux-side)
+# ---------------------------------------------------------------------------
+- name: "=== Linux-side Service Verification Summary ==="
+  ansible.builtin.debug:
+    msg:
+      - "ubuntu-ecom  HTTP  : {{ _verify_ecom_http.stdout  | default('SKIP') | trim }}"
+      - "fedora-email SMTP  : {{ _verify_smtp.stdout        | default('SKIP') | trim }}"
+      - "fedora-email POP3  : {{ _verify_pop3.stdout        | default('SKIP') | trim }}"
+      - "splunk       HTTP  : {{ _verify_splunk.stdout      | default('SKIP') | trim }}"

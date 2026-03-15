@@ -1,0 +1,124 @@
+---
+# ---------------------------------------------------------------------------
+# sshesame SSH honeypot — listens on port 22, logs all attacker connections
+# Real SSH is on a different port (set by linux_harden_ssh / linux_firewall)
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# 1. Deploy binary
+# ---------------------------------------------------------------------------
+- name: sshesame — copy binary
+  ansible.builtin.copy:
+    src: sshesame
+    dest: "{{ sshesame_install_path }}"
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+
+# ---------------------------------------------------------------------------
+# 2. Deploy config file
+# ---------------------------------------------------------------------------
+- name: sshesame — create config directory
+  ansible.builtin.file:
+    path: /etc/sshesame
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+
+- name: sshesame — create data directory
+  ansible.builtin.file:
+    path: "{{ sshesame_data_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  become: true
+
+- name: sshesame — create log file
+  ansible.builtin.file:
+    path: "{{ sshesame_log_path }}"
+    state: touch
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+
+- name: sshesame — deploy config
+  ansible.builtin.copy:
+    dest: "{{ sshesame_config_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      server:
+        listen_address: ":{{ sshesame_port }}"
+      ssh_proto:
+        version: "SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.6"
+        banner: ""
+      auth:
+        password_auth:
+          enabled: true
+          accepted: true
+        public_key_auth:
+          enabled: true
+          accepted: false
+      logging:
+        file: "{{ sshesame_log_path }}"
+        json: true
+        timestamps: true
+  become: true
+  notify: Restart sshesame
+
+# ---------------------------------------------------------------------------
+# 3. Deploy systemd service
+# ---------------------------------------------------------------------------
+- name: sshesame — deploy systemd service
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/sshesame.service
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=sshesame SSH honeypot
+      After=network.target
+
+      [Service]
+      Type=simple
+      ExecStart={{ sshesame_install_path }} -config {{ sshesame_config_path }} -data_dir {{ sshesame_data_dir }}
+      Restart=on-failure
+      RestartSec=5
+      StandardOutput=journal
+      StandardError=journal
+      AmbientCapabilities=CAP_NET_BIND_SERVICE
+
+      [Install]
+      WantedBy=multi-user.target
+  become: true
+  notify: Restart sshesame
+
+- name: sshesame — enable and start service
+  ansible.builtin.service:
+    name: sshesame
+    state: started
+    enabled: true
+    daemon_reload: true
+  become: true
+
+# ---------------------------------------------------------------------------
+# 4. Verify listening
+# ---------------------------------------------------------------------------
+- name: sshesame — verify port {{ sshesame_port }} is listening
+  ansible.builtin.wait_for:
+    port: "{{ sshesame_port }}"
+    host: 127.0.0.1
+    state: started
+    timeout: 20
+  become: false
+
+# NOTE: Honeypot alerting is handled by Wazuh (wazuh_custom_rules role) which
+# monitors sshesame_log_path and fires high-severity alerts on connection events.
+# wall-based alerting was removed — it would broadcast to red team terminals too.

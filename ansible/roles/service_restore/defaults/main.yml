@@ -1,0 +1,27 @@
+---
+# Must match service_backup defaults so the restore role finds the right files.
+# Backups live locally on each host — no controller transfer.
+# Linux hosts: /root/.ccdc_backups/<service>/
+# Windows hosts: C:\ccdc_backups\<service>\
+linux_backup_root: /root/.ccdc_backups
+win_backup_root: 'C:\ccdc_backups'
+
+# --- Apache ---
+svc_apache2_webroot: /var/www
+
+# --- MySQL ---
+# Auth via unix_socket (root OS user = root DB user, no password needed)
+svc_mysql_databases: "--all-databases"
+
+# --- Splunk ---
+svc_splunk_home: /opt/splunk
+
+# --- IIS ---
+svc_iis_webroot: 'C:\inetpub\wwwroot'
+svc_iis_config_dir: 'C:\Windows\System32\inetsrv\config'
+
+# --- IIS FTP ---
+svc_iis_ftp_root: 'C:\inetpub\ftproot'
+
+# --- DNS ---
+svc_dns_export_dir: 'C:\Windows\System32\dns\backup'

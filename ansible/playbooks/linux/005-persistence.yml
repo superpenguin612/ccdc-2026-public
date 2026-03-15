@@ -1,0 +1,13 @@
+---
+# Scan for and remove red team persistence mechanisms on Linux hosts.
+# Run after 004-hardening.yml.
+#
+# Usage:
+#   ansible-playbook playbooks/linux/005-persistence.yml
+
+- name: Hunt and remove Linux persistence
+  hosts: linux
+  gather_facts: true
+  roles:
+    - linux_persistence
+    - linux_clamav

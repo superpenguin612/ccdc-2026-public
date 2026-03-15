@@ -1,0 +1,8 @@
+---
+controller_hosts_file_path: /etc/hosts
+controller_hosts_block_marker: "# {mark} CCDC ANSIBLE HOSTS"
+controller_hosts_local_addresses:
+  - 127.0.0.1
+  - localhost
+  - ::1
+controller_hosts_skip_hosts: []

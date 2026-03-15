@@ -1,0 +1,187 @@
+---
+- name: Set collection timestamp
+  ansible.builtin.set_fact:
+    _collect_ts: "{{ ansible_date_time.iso8601_basic_short }}"
+  delegate_to: localhost
+  run_once: false
+
+- name: Create timestamped output directory on controller
+  delegate_to: localhost
+  ansible.builtin.file:
+    path: "{{ collect_output_dir }}/{{ _collect_ts }}"
+    state: directory
+    mode: '0700'
+
+# --- Installed Packages ---
+- name: Collect installed packages (Debian/Ubuntu)
+  ansible.builtin.shell: dpkg -l 2>/dev/null || rpm -qa 2>/dev/null
+  register: packages
+  changed_when: false
+  become: true
+
+- name: Save installed packages to controller
+  delegate_to: localhost
+  ansible.builtin.copy:
+    content: "{{ packages.stdout }}"
+    dest: "{{ collect_output_dir }}/{{ _collect_ts }}/installed_packages.txt"
+
+# --- Services ---
+- name: Collect systemd service states
+  ansible.builtin.shell: systemctl list-units --type=service --all --no-pager --plain
+  register: services
+  changed_when: false
+  become: true
+
+- name: Save service list to controller
+  delegate_to: localhost
+  ansible.builtin.copy:
+    content: "{{ services.stdout }}"
+    dest: "{{ collect_output_dir }}/{{ _collect_ts }}/services.txt"
+
+- name: Collect systemd enabled units
+  ansible.builtin.shell: systemctl list-unit-files --type=service --no-pager --plain
+  register: enabled_units
+  changed_when: false
+  become: true
+
+- name: Save enabled units to controller
+  delegate_to: localhost
+  ansible.builtin.copy:
+    content: "{{ enabled_units.stdout }}"
+    dest: "{{ collect_output_dir }}/{{ _collect_ts }}/enabled_services.txt"
+
+# --- Network ---
+- name: Collect IP addresses
+  ansible.builtin.command: ip addr
+  register: ip_addr
+  changed_when: false
+
+- name: Save IP addresses to controller
+  delegate_to: localhost
+  ansible.builtin.copy:
+    content: "{{ ip_addr.stdout }}"
+    dest: "{{ collect_output_dir }}/{{ _collect_ts }}/ip_addr.txt"
+
+- name: Collect routing table
+  ansible.builtin.command: ip route
+  register: ip_route
+  changed_when: false
+
+- name: Save routing table to controller
+  delegate_to: localhost
+  ansible.builtin.copy:
+    content: "{{ ip_route.stdout }}"
+    dest: "{{ collect_output_dir }}/{{ _collect_ts }}/ip_route.txt"
+
+- name: Collect listening ports
+  ansible.builtin.shell: ss -tlnup
+  register: ss_output
+  changed_when: false
+  become: true
+
+- name: Save listening ports to controller
+  delegate_to: localhost
+  ansible.builtin.copy:
+    content: "{{ ss_output.stdout }}"
+    dest: "{{ collect_output_dir }}/{{ _collect_ts }}/listening_ports.txt"
+
+# --- Firewall ---
+- name: Collect iptables rules
+  ansible.builtin.shell: iptables -L -n -v 2>/dev/null || echo "(not available)"
+  register: iptables
+  changed_when: false
+  become: true
+
+- name: Save iptables rules to controller
+  delegate_to: localhost
+  ansible.builtin.copy:
+    content: "{{ iptables.stdout }}"
+    dest: "{{ collect_output_dir }}/{{ _collect_ts }}/iptables.txt"
+
+- name: Collect ufw status
+  ansible.builtin.shell: ufw status verbose 2>/dev/null || echo "(ufw not installed)"
+  register: ufw
+  changed_when: false
+  become: true
+
+- name: Save ufw status to controller
+  delegate_to: localhost
+  ansible.builtin.copy:
+    content: "{{ ufw.stdout }}"
+    dest: "{{ collect_output_dir }}/{{ _collect_ts }}/ufw.txt"
+
+# --- SSH ---
+- name: Collect SSH authorized_keys for all users
+  ansible.builtin.shell: |
+    for home in /root /home/*; do
+      user=$(basename "$home")
+      keyfile="$home/.ssh/authorized_keys"
+      if [ -f "$keyfile" ]; then
+        echo "=== $user ==="
+        cat "$keyfile"
+      fi
+    done
+  register: authorized_keys
+  changed_when: false
+  become: true
+
+- name: Save authorized_keys to controller
+  delegate_to: localhost
+  ansible.builtin.copy:
+    content: "{{ authorized_keys.stdout }}"
+    dest: "{{ collect_output_dir }}/{{ _collect_ts }}/authorized_keys_all.txt"
+
+# --- Cron ---
+- name: Collect all user crontabs
+  ansible.builtin.shell: |
+    for user in $(cut -d: -f1 /etc/passwd); do
+      crontab -u "$user" -l 2>/dev/null && echo "--- ($user) ---" || true
+    done
+  register: cron_users
+  changed_when: false
+  become: true
+
+- name: Save user crontabs to controller
+  delegate_to: localhost
+  ansible.builtin.copy:
+    content: "{{ cron_users.stdout }}"
+    dest: "{{ collect_output_dir }}/{{ _collect_ts }}/cron_users.txt"
+
+# --- Processes & SUID ---
+- name: Collect running processes
+  ansible.builtin.shell: ps auxf
+  register: processes
+  changed_when: false
+  become: true
+
+- name: Save running processes to controller
+  delegate_to: localhost
+  ansible.builtin.copy:
+    content: "{{ processes.stdout }}"
+    dest: "{{ collect_output_dir }}/{{ _collect_ts }}/processes.txt"
+
+# --- Full tarball of /etc, /var/spool/cron, /home ---
+- name: Create tarball of /etc, /var/spool/cron, /home on remote host
+  ansible.builtin.shell: |
+    tar czf /tmp/ccdc26_snapshot.tar.gz \
+      --ignore-failed-read \
+      --exclude=/home/azul \
+      /etc \
+      /var/spool/cron \
+      /home \
+      2>/dev/null || true
+  become: true
+  changed_when: false
+
+- name: Fetch tarball to controller
+  ansible.builtin.fetch:
+    src: /tmp/ccdc26_snapshot.tar.gz
+    dest: "{{ collect_output_dir }}/{{ _collect_ts }}/snapshot.tar.gz"
+    flat: true
+  become: true
+
+- name: Remove tarball from remote host
+  ansible.builtin.file:
+    path: /tmp/ccdc26_snapshot.tar.gz
+    state: absent
+  become: true

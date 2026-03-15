@@ -1,0 +1,50 @@
+---
+- name: Configure sshd_config
+  community.windows.win_lineinfile:
+    path: 'C:\ProgramData\ssh\sshd_config'
+    regexp: "{{ item.regexp }}"
+    line: "{{ item.line }}"
+    state: present
+  loop:
+    - { regexp: '^#?Port\s+',                                                               line: "Port {{ windows_ssh_port }}" }
+    - { regexp: '^#?PubkeyAuthentication\s+',                                               line: 'PubkeyAuthentication yes' }
+    - { regexp: '^#?PasswordAuthentication\s+',                                             line: 'PasswordAuthentication no' }
+    - { regexp: '^#?KbdInteractiveAuthentication\s+|^#?ChallengeResponseAuthentication\s+', line: 'KbdInteractiveAuthentication no' }
+
+- name: Set default shell to PowerShell
+  ansible.windows.win_regedit:
+    path: HKLM:\SOFTWARE\OpenSSH
+    name: DefaultShell
+    data: 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
+    type: string
+
+- name: Push SSH public key to administrators_authorized_keys
+  ansible.windows.win_copy:
+    content: "{{ vault_ssh_public_key }}"
+    dest: 'C:\ProgramData\ssh\administrators_authorized_keys'
+
+- name: Lock down administrators_authorized_keys ACLs
+  ansible.windows.win_powershell:
+    script: |
+      $path = 'C:\ProgramData\ssh\administrators_authorized_keys'
+      $acl = Get-Acl $path
+      $acl.SetAccessRuleProtection($true, $false)
+      $acl.SetAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule("BUILTIN\Administrators", "FullControl", "Allow")))
+      $acl.SetAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule("NT AUTHORITY\SYSTEM", "FullControl", "Allow")))
+      Set-Acl $path $acl
+
+- name: Open Windows Firewall rule for SSH on port {{ windows_ssh_port }}
+  ansible.windows.win_powershell:
+    script: |
+      $rule = "OpenSSH-Server-In-{{ windows_ssh_port }}"
+      if (-not (Get-NetFirewallRule -DisplayName $rule -ErrorAction SilentlyContinue)) {
+        New-NetFirewallRule -DisplayName $rule -Direction Inbound -Protocol TCP -LocalPort {{ windows_ssh_port }} -Action Allow
+      }
+      Remove-NetFirewallRule -DisplayName "OpenSSH SSH Server (sshd)" -ErrorAction SilentlyContinue
+      Remove-NetFirewallRule -DisplayName "OpenSSH-Server-In-TCP" -ErrorAction SilentlyContinue
+
+- name: Enable and restart sshd
+  ansible.windows.win_service:
+    name: sshd
+    start_mode: auto
+    state: restarted

@@ -1,0 +1,14 @@
+---
+- name: Allow Outbound SSH (Ansible controller)
+  paloaltonetworks.panos.panos_security_rule:
+    provider: "{{ panos_provider }}"
+    rule_name: "Outbound_SSH_Ansible"
+    source_zone: ["internal"]
+    source_ip: ["Internal_Net"]
+    destination_zone: ["external"]
+    destination_ip: ["any"]
+    application: "{{ app_type_mappings.fw_ssh.palo_apps }}"
+    service: "{{ app_type_mappings.fw_ssh.palo_service }}"
+    action: "allow"
+    log_setting: "{{ palo_log_setting }}"
+  when: "'ubuntu-wkst' in groups[protected_group] | default([])"

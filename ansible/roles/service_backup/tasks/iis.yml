@@ -1,0 +1,17 @@
+---
+- name: IIS — ensure backup directory exists on host
+  ansible.windows.win_file:
+    path: "{{ win_backup_root }}\\iis"
+    state: directory
+
+- name: IIS — zip webroot to local backup directory
+  ansible.windows.win_shell: |
+    $dest = "{{ win_backup_root }}\iis\iis_webroot.zip"
+    if (Test-Path $dest) { Remove-Item $dest -Force }
+    Compress-Archive -Path "{{ svc_iis_webroot }}" -DestinationPath $dest -Force
+
+- name: IIS — zip IIS config directory to local backup directory
+  ansible.windows.win_shell: |
+    $dest = "{{ win_backup_root }}\iis\iis_config.zip"
+    if (Test-Path $dest) { Remove-Item $dest -Force }
+    Compress-Archive -Path "{{ svc_iis_config_dir }}" -DestinationPath $dest -Force

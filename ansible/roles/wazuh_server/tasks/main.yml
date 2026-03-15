@@ -1,0 +1,66 @@
+---
+- name: Download Wazuh install script
+  ansible.builtin.get_url:
+    url: https://packages.wazuh.com/4.14/wazuh-install.sh
+    dest: /tmp/wazuh-install.sh
+    mode: "0700"
+    validate_certs: no
+    force: yes
+
+- name: Pause for manual Wazuh installation step
+  ansible.builtin.pause:
+    prompt: "Please run the Wazuh all-in-one installer manually (bash /tmp/wazuh-install.sh -a -i), then press Enter to continue."
+
+- name: Download Wazuh passwords tool
+  ansible.builtin.get_url:
+    url: https://packages.wazuh.com/4.14/wazuh-passwords-tool.sh
+    dest: /tmp/wazuh-passwords-tool.sh
+    mode: "0700"
+    validate_certs: no
+    force: yes
+  become: yes
+
+- name: Set Wazuh admin password
+  ansible.builtin.command:
+    cmd: bash /tmp/wazuh-passwords-tool.sh -u admin -p {{ vault_wazuh_password }}
+  become: yes
+  register: wazuh_password_set
+
+- name: Display Wazuh password tool output
+  ansible.builtin.debug:
+    var: wazuh_password_set.stdout_lines
+
+- name: Create Wazuh agent groups
+  ansible.builtin.command:
+    cmd: /var/ossec/bin/agent_groups -a -g {{ item }} -q
+  become: yes
+  loop:
+    - linux
+    - windows
+  register: group_create
+  failed_when: group_create.rc != 0 and 'already exists' not in group_create.stderr
+
+- name: Configure Wazuh syslog remote listener (UDP 514 for Palo Alto logs)
+  ansible.builtin.blockinfile:
+    path: /var/ossec/etc/ossec.conf
+    marker: "<!-- {mark} ANSIBLE MANAGED - palo syslog remote -->"
+    insertafter: "<ossec_config>"
+    block: |
+      <remote>
+        <connection>syslog</connection>
+        <port>514</port>
+        <protocol>udp</protocol>
+        <allowed-ips>{{ hostvars['palo-alto1']['int_net'] }}</allowed-ips>
+        <allowed-ips>{{ hostvars['palo-alto2']['pub_net'] }}</allowed-ips>
+      </remote>
+  become: yes
+  notify: Restart wazuh-manager
+
+- name: Ensure wazuh-manager is started and enabled
+  ansible.builtin.service:
+    name: wazuh-manager
+    state: started
+    enabled: true
+  become: yes
+
+

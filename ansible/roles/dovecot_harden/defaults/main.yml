@@ -1,0 +1,9 @@
+---
+# Protocols to enable — pop3 only (scored service)
+dovecot_harden_protocols: "pop3"
+
+# Delay after failed auth attempt (slow brute force)
+dovecot_harden_auth_failure_delay: "2 secs"
+
+# Mail storage location
+dovecot_harden_mail_location: "maildir:~/Maildir"

@@ -1,0 +1,12 @@
+---
+# Dispatch based on which workstation is running this role.
+# win11-wkst  → test Linux-side services
+# ubuntu-wkst → test Windows-side services
+
+- name: Service verify — run Linux-side tests (from win11-wkst)
+  ansible.builtin.include_tasks: test_linux_side.yml
+  when: inventory_hostname == 'win11-wkst'
+
+- name: Service verify — run Windows-side tests (from ubuntu-wkst)
+  ansible.builtin.include_tasks: test_windows_side.yml
+  when: inventory_hostname == 'ubuntu-wkst'

@@ -1,0 +1,11 @@
+---
+- name: Reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+  become: true
+
+- name: Restart splunkforwarder
+  ansible.builtin.systemd:
+    name: splunkforwarder
+    state: restarted
+  become: true

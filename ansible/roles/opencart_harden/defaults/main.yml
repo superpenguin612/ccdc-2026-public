@@ -1,0 +1,15 @@
+---
+# Fallback only — webroot is discovered dynamically from config.php at runtime
+opencart_webroot: /var/www/opencart/upload
+
+# OpenCart MySQL user credentials
+# opencart_db_password should be set in host_vars referencing the vault:
+#   opencart_db_password: "{{ vault_opencart_db_password }}"
+opencart_db_user: opencart
+opencart_db_host: "localhost"
+opencart_db_name: opencart
+
+# OpenCart admin panel credentials
+# opencart_admin_password should reference the vault:
+#   opencart_admin_password: "{{ vault_opencart_admin_password }}"
+opencart_admin_user: admin

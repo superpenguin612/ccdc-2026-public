@@ -1,0 +1,51 @@
+---
+# ---------------------------------------------------------------------------
+# Install GVM/OpenVAS and the python-gvm library for automation
+# ---------------------------------------------------------------------------
+
+- name: OpenVAS — add Greenbone Community Edition PPA
+  ansible.builtin.apt_repository:
+    repo: ppa:mrazavi/gvm
+    state: present
+    update_cache: false
+  become: true
+  register: _openvas_ppa
+  failed_when: false   # PPA may not be available; fall back to distro package
+
+- name: OpenVAS — update apt cache
+  ansible.builtin.apt:
+    update_cache: true
+  become: true
+
+- name: OpenVAS — install GVM packages
+  ansible.builtin.apt:
+    name:
+      - gvm
+      - gvm-tools         # provides gvm-cli and gvm-script
+      - python3-gvm        # python-gvm library
+      - python3-pip
+      - postgresql
+      - redis-server
+    state: present
+  become: true
+
+- name: OpenVAS — install python-gvm via pip (ensure latest version)
+  ansible.builtin.pip:
+    name: python-gvm
+    state: present
+    executable: pip3
+  become: true
+
+- name: OpenVAS — ensure postgresql is running
+  ansible.builtin.service:
+    name: postgresql
+    state: started
+    enabled: true
+  become: true
+
+- name: OpenVAS — ensure redis is running
+  ansible.builtin.service:
+    name: redis-server
+    state: started
+    enabled: true
+  become: true

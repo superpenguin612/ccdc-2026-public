@@ -1,0 +1,7 @@
+# Managed by Ansible — do not edit manually
+[tcpout]
+defaultGroup = ccdc_indexer
+compressed = true
+
+[tcpout:ccdc_indexer]
+server = {{ splunk_indexer_ip }}:{{ splunk_indexer_port }}

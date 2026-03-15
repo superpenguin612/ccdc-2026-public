@@ -1,0 +1,12 @@
+---
+# Remote path to upload and run linpeas from
+linux_linpeas_remote_path: /tmp/linpeas
+
+# Where to save output on the controller
+linux_linpeas_artifact_root: "{{ artifact_root | default('/tmp/ansible-artifacts') }}"
+
+# Extra flags passed to linpeas (e.g. "-a" for all checks, "-s" for stealth)
+linux_linpeas_flags: "-a"
+
+# Remove linpeas script from the remote host after running
+linux_linpeas_cleanup: true

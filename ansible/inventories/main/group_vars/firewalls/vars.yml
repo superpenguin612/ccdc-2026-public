@@ -1,0 +1,200 @@
+---
+_creds: "{{ host_defaults[inventory_hostname] if (use_default_creds | default(false)) else (vault_new_credentials | default({}))[inventory_hostname] }}"
+
+panos_provider:
+  ip_address: "{{ ansible_host }}"
+  username: "{{ _creds.user }}"
+  password: "{{ _creds.password }}"
+  port: "{{ panos_port | default(443) }}"
+
+palo_log_setting: "CCDC-Wazuh"
+
+app_type_mappings:
+  fw_http:
+    palo_apps:
+      - 'any'
+    palo_service:
+      - 'service-http'
+    ports: [80]
+
+  fw_https:
+    palo_apps:
+      - 'any'
+    palo_service:
+      - 'service-https'
+    ports: [443]
+
+  fw_smtp:
+    palo_apps: 
+      - 'smtp-base'
+    palo_service:
+      - 'application-default'
+    ports: [25]
+
+  fw_pop3:
+    palo_apps:
+      - 'pop3'
+    palo_service:
+      - 'application-default'
+    ports: [110]
+
+  fw_imap:
+    palo_apps:
+      - 'imap'
+    palo_service:
+      - 'application-default'
+    ports: [143]
+
+  fw_smtp_secure:
+    palo_apps: 
+      - 'smtp-starttls'
+    palo_service:
+      - 'service-smtp-sec' # Custom - must be made using playbook
+    ports: [587]
+
+  fw_pop3_secure:
+    palo_apps:
+      - 'ssl'
+      - 'pop3' # If SSL Decryption is enabled
+    palo_service: 
+      - 'service-pop3-sec' # Custom - must be made using playbook
+    ports: [997]
+
+  fw_imaps:
+    palo_apps:
+      - 'ssl'
+      - 'imap' # If SSL Decryption is enabled
+    palo_service: 
+      - 'service-imap-sec' # Custom - must be made using playbook
+    ports: [993]
+  
+  # ---------------------------------------------------------
+  # File Transfer (IIS FTP)
+  # ---------------------------------------------------------
+  fw_ftp:
+    palo_apps: 
+      - 'ftp'
+    palo_service:
+      - 'application-default'
+    ports: [21, 20] # 21 for control, 20 for active data
+
+  # ---------------------------------------------------------
+  # Domain Naming System (Standalone DNS)
+  # ---------------------------------------------------------
+  fw_dns:
+    palo_apps: 
+      - 'dns-base'
+    palo_service:
+      - 'application-default'
+    ports: [53]
+
+  # ---------------------------------------------------------
+  # Splunk (Log Forwarding & Web Interface)
+  # ---------------------------------------------------------
+  fw_splunk_web:
+    palo_apps: 
+      - 'web-browsing'        # PAN-OS natively identifies Splunk traffic
+    palo_service:
+      - 'service-splunk-web' # Custom - must be made using playbook
+    ports: [8000]
+
+  fw_splunk_forwarder:
+    palo_apps: 
+      - 'splunk'        # PAN-OS natively identifies Splunk traffic
+    palo_service:
+      - 'service-splunk-forward' # Custom - must be made using playbook
+    ports: [9997]
+
+  fw_wazuh_web:
+    palo_apps:
+      - 'ssl'
+    palo_service:
+      - 'application-default'
+    ports: [443]
+
+  fw_wazuh_forwarder:
+    palo_apps:
+      - 'wazuh-agent'
+    palo_service:
+      - 'service-wazuh-web'
+    ports: [1514, 1515] # 1514 for agent comms, 1515 for agent enrollment
+
+  # ---------------------------------------------------------
+  # Active Directory (Crucial for Domain Controllers)
+  # AD requires a complex mix of App-IDs to function properly
+  # ---------------------------------------------------------
+  fw_ad:
+    palo_apps: 
+      - 'active-directory'
+      - 'kerberos'
+      - 'ms-netlogon'
+      - 'ms-ds-smb-base'
+      - 'netbios-dg'
+      - 'netbios-ns'
+      - 'netbios-ss'
+    palo_service:
+      - 'application-default'
+    ports: [53, 88, 135, 139, 389, 445, 636, 3268, 3269]
+
+  fw_ldap:
+    palo_apps:
+      - 'ldap'
+    palo_service:
+      - 'application-default'
+    ports: [389]
+
+  fw_kerberos:
+    palo_apps:
+      - 'kerberos'
+    palo_service:
+      - 'application-default'
+    ports: [88]
+
+  fw_msrpc:
+    palo_apps:
+      - 'msrpc'
+    palo_service:
+      - 'application-default'
+    ports: [135]
+
+  fw_smb:
+    palo_apps:
+      - 'ms-ds-smb'
+    palo_service:
+      - 'application-default'
+    ports: [445, 139]
+
+  fw_ssh:
+    palo_apps: 
+      - 'ssh'
+    palo_service:
+      - 'service-ssh'
+    ports: ["{{ vault_ssh_port }}"]
+
+  fw_honey:
+    palo_apps:
+      - 'ssh'
+    palo_service:
+      - 'application-default'
+    ports: [22]
+
+  fw_ntp:
+    palo_apps:
+      - 'ntp-base'
+    palo_service:
+      - 'application-default'
+    ports: [123]
+
+  fw_ptp:
+    palo_apps:
+      - 'ieee-ptp'
+    palo_service: 
+      - 'application-default'
+    ports: [319, 320]
+
+  fw_tftp:
+    palo_apps:
+      - 'tftp'
+    palo_service:
+      - 'application-default'
+    ports: [69]

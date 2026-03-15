@@ -1,0 +1,366 @@
+---
+# ---------------------------------------------------------------------------
+# 0. Discover OpenCart webroot and admin dir dynamically
+#    Main config.php: contains DB_HOSTNAME, not under any admin dir.
+#    Admin config.php: any config.php under a dir whose name starts with 'admin'.
+#    Falls back to opencart_webroot default if nothing found.
+# ---------------------------------------------------------------------------
+- name: OpenCart — find main config.php by content
+  ansible.builtin.shell: |
+    grep -rl "DB_HOSTNAME" /var/www 2>/dev/null | grep 'config\.php' \
+      | grep -v '/admin' | head -1
+  register: _oc_config_path
+  changed_when: false
+  become: true
+
+- name: OpenCart — set webroot from discovered config.php
+  ansible.builtin.set_fact:
+    opencart_webroot: "{{ _oc_config_path.stdout | dirname }}"
+  when: _oc_config_path.stdout != ''
+
+- name: OpenCart — warn if webroot not found, using default
+  ansible.builtin.debug:
+    msg: "WARNING: Could not discover OpenCart webroot, using default: {{ opencart_webroot }}"
+  when: _oc_config_path.stdout == ''
+
+- name: OpenCart — find admin config.php (handles default and renamed dir)
+  ansible.builtin.shell: |
+    find "{{ opencart_webroot }}" -maxdepth 2 -name config.php 2>/dev/null \
+      | grep -E '/admin[^/]*/config\.php$' | head -1
+  register: _oc_admin_config_path
+  changed_when: false
+  become: true
+
+# ---------------------------------------------------------------------------
+# 1. Back up config.php files before touching anything
+# ---------------------------------------------------------------------------
+- name: OpenCart — back up main config.php
+  ansible.builtin.copy:
+    src: "{{ opencart_webroot }}/config.php"
+    dest: "{{ opencart_webroot }}/config.php.ccdc.bak"
+    remote_src: true
+    force: false
+    mode: preserve
+  become: true
+  failed_when: false
+
+- name: OpenCart — back up admin config.php
+  ansible.builtin.copy:
+    src: "{{ _oc_admin_config_path.stdout }}"
+    dest: "{{ _oc_admin_config_path.stdout }}.ccdc.bak"
+    remote_src: true
+    force: false
+    mode: preserve
+  become: true
+  failed_when: false
+  when: _oc_admin_config_path.stdout != ''
+
+# ---------------------------------------------------------------------------
+# 2. Fix server IP in config files (scoring env may have wrong IPs baked in)
+# ---------------------------------------------------------------------------
+- name: OpenCart — fix HTTP_SERVER in main config.php
+  ansible.builtin.replace:
+    path: "{{ opencart_webroot }}/config.php"
+    regexp: "define\\('HTTP_SERVER',\\s*'[^']*'\\);"
+    replace: "define('HTTP_SERVER', 'http://{{ ip_internal }}/');"
+  become: true
+  notify: restart apache2
+
+- name: OpenCart — fix HTTP_CATALOG in main config.php
+  ansible.builtin.replace:
+    path: "{{ opencart_webroot }}/config.php"
+    regexp: "define\\('HTTP_CATALOG',\\s*'[^']*'\\);"
+    replace: "define('HTTP_CATALOG', 'http://{{ ip_internal }}/');"
+  become: true
+  failed_when: false  # not always present
+  notify: restart apache2
+
+- name: OpenCart — fix HTTP_SERVER in admin config.php
+  ansible.builtin.replace:
+    path: "{{ _oc_admin_config_path.stdout }}"
+    regexp: "define\\('HTTP_SERVER',\\s*'[^']*'\\);"
+    replace: "define('HTTP_SERVER', 'http://{{ ip_internal }}/{{ opencart_admin_dir }}/');"
+  become: true
+  when: _oc_admin_config_path.stdout != ''
+  notify: restart apache2
+
+- name: OpenCart — fix HTTP_CATALOG in admin config.php
+  ansible.builtin.replace:
+    path: "{{ _oc_admin_config_path.stdout }}"
+    regexp: "define\\('HTTP_CATALOG',\\s*'[^']*'\\);"
+    replace: "define('HTTP_CATALOG', 'http://{{ ip_internal }}/');"
+  become: true
+  when: _oc_admin_config_path.stdout != ''
+  notify: restart apache2
+
+# ---------------------------------------------------------------------------
+# 2. Change OpenCart DB user password
+# ---------------------------------------------------------------------------
+- name: OpenCart — rotate DB user password
+  ansible.builtin.command: >
+    mysql -e "ALTER USER '{{ opencart_db_user }}'@'{{ opencart_db_host }}'
+    IDENTIFIED BY '{{ opencart_db_password }}'; FLUSH PRIVILEGES;"
+  become: true
+  no_log: true
+
+- name: OpenCart — update DB_PASSWORD in main config.php
+  ansible.builtin.replace:
+    path: "{{ opencart_webroot }}/config.php"
+    regexp: "(define\\('DB_PASSWORD',\\s*')[^']*(')"
+    replace: "\\1{{ opencart_db_password }}\\2"
+  become: true
+  no_log: true
+  notify: restart apache2
+
+- name: OpenCart — update DB_PASSWORD in admin config.php
+  ansible.builtin.replace:
+    path: "{{ _oc_admin_config_path.stdout }}"
+    regexp: "(define\\('DB_PASSWORD',\\s*')[^']*(')"
+    replace: "\\1{{ opencart_db_password }}\\2"
+  become: true
+  no_log: true
+  when: _oc_admin_config_path.stdout != ''
+  notify: restart apache2
+
+# ---------------------------------------------------------------------------
+# 3. Rotate OpenCart admin panel password
+# ---------------------------------------------------------------------------
+- name: OpenCart — generate bcrypt hash for admin password
+  ansible.builtin.command:
+    cmd: php -r "echo password_hash('{{ opencart_admin_password }}', PASSWORD_BCRYPT);"
+  register: _oc_admin_hash
+  changed_when: false
+  no_log: true
+
+- name: OpenCart — update admin password in database
+  ansible.builtin.command: >
+    mysql {{ opencart_db_name }} -e
+    "UPDATE oc_user SET password='{{ _oc_admin_hash.stdout }}'
+    WHERE username='{{ opencart_admin_user }}';"
+  become: true
+  no_log: true
+
+# ---------------------------------------------------------------------------
+# 4. Remove install directory (leaves an open installer if present)
+# ---------------------------------------------------------------------------
+- name: OpenCart — remove install directory
+  ansible.builtin.file:
+    path: "{{ opencart_webroot }}/install"
+    state: absent
+  become: true
+
+# ---------------------------------------------------------------------------
+# 5. Enable .htaccess
+# ---------------------------------------------------------------------------
+- name: OpenCart — enable .htaccess (move from .htaccess.txt)
+  ansible.builtin.command:
+    cmd: mv "{{ opencart_webroot }}/.htaccess.txt" "{{ opencart_webroot }}/.htaccess"
+    creates: "{{ opencart_webroot }}/.htaccess"
+  become: true
+
+# ---------------------------------------------------------------------------
+# 6. Move storage directory outside webroot
+#    Prevents direct web access to logs, cache, sessions, and uploads.
+#    Idempotent: skipped if storage is already outside webroot.
+# ---------------------------------------------------------------------------
+- name: OpenCart — move storage directory outside webroot
+  ansible.builtin.shell: |
+    set -e
+    WEBROOT="{{ opencart_webroot }}"
+    OLD_STORAGE="$WEBROOT/system/storage"
+    NEW_STORAGE="/var/www/opencart_storage"
+
+    # Skip if already moved
+    if [ ! -d "$OLD_STORAGE" ]; then
+      echo "already_moved"
+      exit 0
+    fi
+
+    # Move storage directory
+    mv "$OLD_STORAGE" "$NEW_STORAGE"
+    chown -R www-data:www-data "$NEW_STORAGE"
+    chmod -R 750 "$NEW_STORAGE"
+
+    # Update DIR_STORAGE in both config files
+    sed -i "s|define('DIR_STORAGE',[^;]*;|define('DIR_STORAGE', '$NEW_STORAGE/');|" "$WEBROOT/config.php" || true
+    find "$WEBROOT" -maxdepth 2 -name config.php | grep -E '/admin[^/]*/config\.php$' \
+      | xargs -I{} sed -i "s|define('DIR_STORAGE',[^;]*;|define('DIR_STORAGE', '$NEW_STORAGE/');|" {} || true
+
+    echo "moved"
+  become: true
+  register: _oc_storage_result
+  changed_when: "'moved' in _oc_storage_result.stdout"
+  notify: restart apache2
+
+# ---------------------------------------------------------------------------
+# 7. Rename admin directory and update all path references in config files
+#    Idempotent: skipped if admin dir is already renamed (no 'admin' dir exists).
+#    Uses sed to replace all occurrences of /admin/ with /{{ opencart_admin_dir }}/
+#    in both config files before renaming the directory.
+# ---------------------------------------------------------------------------
+- name: OpenCart — rename admin dir and update all config references
+  ansible.builtin.shell: |
+    set -e
+    WEBROOT="{{ opencart_webroot }}"
+    SECURE="{{ opencart_admin_dir }}"
+
+    # Skip if already renamed
+    if [ ! -d "$WEBROOT/admin" ]; then
+      echo "already_done"
+      exit 0
+    fi
+
+    # Update all admin path references in both config files
+    sed -i "s|\badmin\b|$SECURE|g" "$WEBROOT/admin/config.php" || true
+
+    # Rename the directory
+    mv "$WEBROOT/admin" "$WEBROOT/$SECURE"
+    echo "renamed"
+  become: true
+  register: _oc_rename_result
+  changed_when: "'renamed' in _oc_rename_result.stdout"
+
+# ---------------------------------------------------------------------------
+# 7. Harden file permissions
+# ---------------------------------------------------------------------------
+- name: OpenCart — set webroot ownership to www-data
+  ansible.builtin.file:
+    path: "{{ opencart_webroot }}"
+    owner: www-data
+    group: www-data
+    recurse: true
+  become: true
+
+- name: OpenCart — set directory permissions to 750
+  ansible.builtin.command:
+    cmd: find {{ opencart_webroot }} -type d -exec chmod 750 {} +
+  become: true
+  changed_when: false
+
+- name: OpenCart — set file permissions to 640
+  ansible.builtin.command:
+    cmd: find {{ opencart_webroot }} -type f -exec chmod 640 {} +
+  become: true
+  changed_when: false
+
+- name: OpenCart — allow write access to writable dirs (dirs 770, files 660)
+  ansible.builtin.shell: |
+    find "{{ opencart_webroot }}/{{ item }}" -type d -exec chmod 770 {} + 2>/dev/null || true
+    find "{{ opencart_webroot }}/{{ item }}" -type f -exec chmod 660 {} + 2>/dev/null || true
+  loop:
+    - image
+    - catalog/view/theme
+  become: true
+  changed_when: false
+
+- name: OpenCart — lock down config.php files (read-only)
+  ansible.builtin.file:
+    path: "{{ item }}"
+    mode: "0440"
+  loop:
+    - "{{ opencart_webroot }}/config.php"
+    - "{{ opencart_webroot }}/{{ opencart_admin_dir }}/config.php"
+  become: true
+  failed_when: false
+
+# ---------------------------------------------------------------------------
+# 8. Restrict admin panel access by IP (.htaccess)
+# ---------------------------------------------------------------------------
+- name: OpenCart — get host primary interface subnet
+  ansible.builtin.shell: |
+    ip -4 -o addr show scope global | head -1 | awk '{print $4}'
+  register: _oc_iface_cidr
+  changed_when: false
+  become: false
+
+- name: OpenCart — deploy admin .htaccess IP restriction
+  ansible.builtin.copy:
+    dest: "{{ opencart_webroot }}/{{ opencart_admin_dir }}/.htaccess"
+    owner: www-data
+    group: www-data
+    mode: "0640"
+    content: |
+      # Restrict OpenCart admin panel to localhost and local subnet
+      <IfModule mod_authz_core.c>
+          Require ip 127.0.0.1
+          Require ip ::1
+          Require ip {{ _oc_iface_cidr.stdout | default('10.0.0.0/8') }}
+      </IfModule>
+  become: true
+
+# ---------------------------------------------------------------------------
+# 9. Block PHP execution in upload/image directories (webshell prevention)
+#    Red team drops shells into image/upload dirs because they're writable.
+#    These dirs should never need to execute PHP — only serve static files.
+# ---------------------------------------------------------------------------
+- name: OpenCart — block PHP execution in image directory
+  ansible.builtin.copy:
+    dest: "{{ opencart_webroot }}/image/.htaccess"
+    owner: www-data
+    group: www-data
+    mode: "0640"
+    content: |
+      # Block PHP execution in image directory — no scripts should run here
+      <FilesMatch "\.(php|php5|php7|phtml|phar|shtml|pl|py|cgi|sh)$">
+          Require all denied
+      </FilesMatch>
+      Options -ExecCGI -Indexes
+      php_flag engine off
+  become: true
+  failed_when: false
+
+- name: OpenCart — block PHP execution in storage directory
+  ansible.builtin.copy:
+    dest: "{{ opencart_webroot }}/system/storage/.htaccess"
+    owner: www-data
+    group: www-data
+    mode: "0640"
+    content: |
+      # Block PHP execution in storage directory — no scripts should run here
+      <FilesMatch "\.(php|php5|php7|phtml|phar|shtml|pl|py|cgi|sh)$">
+          Require all denied
+      </FilesMatch>
+      Options -ExecCGI -Indexes
+      php_flag engine off
+  become: true
+  failed_when: false
+
+- name: OpenCart — block PHP execution in catalog/view/theme directory
+  ansible.builtin.copy:
+    dest: "{{ opencart_webroot }}/catalog/view/theme/.htaccess"
+    owner: www-data
+    group: www-data
+    mode: "0640"
+    content: |
+      # Block PHP execution in theme directory — static assets only
+      <FilesMatch "\.(php|php5|php7|phtml|phar|shtml|pl|py|cgi|sh)$">
+          Require all denied
+      </FilesMatch>
+      Options -ExecCGI -Indexes
+      php_flag engine off
+  become: true
+  failed_when: false
+
+# ---------------------------------------------------------------------------
+# 10. chattr +i on config.php files (immutable — survive webshell writes)
+# ---------------------------------------------------------------------------
+- name: OpenCart — remove immutable bit before locking (idempotent)
+  ansible.builtin.command: >
+    chattr -i
+    {{ opencart_webroot }}/config.php
+    {{ opencart_webroot }}/{{ opencart_admin_dir }}/config.php
+  become: true
+  failed_when: false
+  changed_when: false
+
+- name: OpenCart — set config.php files immutable with chattr +i
+  ansible.builtin.command: >
+    chattr +i
+    {{ opencart_webroot }}/config.php
+    {{ opencart_webroot }}/{{ opencart_admin_dir }}/config.php
+  become: true
+  failed_when: false
+  changed_when: true
+
+# NOTE: PHP hardening is handled by the php_harden role.
+# NOTE: MySQL hardening is handled by the mysql_harden role.

@@ -1,0 +1,6 @@
+---
+- name: Reload postfix
+  ansible.builtin.service:
+    name: "{{ postfix_harden_service }}"
+    state: reloaded
+  become: true

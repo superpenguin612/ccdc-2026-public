@@ -1,0 +1,17 @@
+---
+- name: Set up palo-alto2 tunnel
+  hosts: ubuntu-wkst
+  roles:
+    - palo2_ssh_tunnel
+
+- name: Export palo config
+  hosts: firewalls
+
+  collections:
+    - paloaltonetworks.panos
+
+  vars:
+    use_default_creds: true
+
+  roles:
+    - role: palo_export_config

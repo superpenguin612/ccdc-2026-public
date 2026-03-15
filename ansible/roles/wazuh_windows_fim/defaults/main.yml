@@ -1,0 +1,13 @@
+---
+wazuh_fim_dirs:
+  - path: 'C:\Windows\System32'
+  - path: 'C:\Windows\SysWOW64'
+  - path: 'C:\Users'
+  - path: 'C:\inetpub'
+  - path: 'C:\Program Files'
+  - path: 'C:\Program Files (x86)'
+
+# Per-host extra dirs — override in host_vars:
+# wazuh_fim_extra_dirs:
+#   - path: 'C:\CustomApp'
+wazuh_fim_extra_dirs: []

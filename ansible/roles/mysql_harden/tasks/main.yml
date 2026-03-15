@@ -1,0 +1,155 @@
+---
+# ---------------------------------------------------------------------------
+# 0. Back up config before touching anything
+# ---------------------------------------------------------------------------
+- name: MySQL — back up mysqld.cnf
+  ansible.builtin.copy:
+    src: /etc/mysql/mysql.conf.d/mysqld.cnf
+    dest: /etc/mysql/mysql.conf.d/mysqld.cnf.ccdc.bak
+    remote_src: true
+    force: false
+    mode: preserve
+  become: true
+  failed_when: false
+
+# ---------------------------------------------------------------------------
+# 1. Ensure MySQL is bound to localhost only (no external exposure)
+# ---------------------------------------------------------------------------
+- name: MySQL — set bind-address to 127.0.0.1
+  community.general.ini_file:
+    path: /etc/mysql/mysql.conf.d/mysqld.cnf
+    section: mysqld
+    option: bind-address
+    value: "127.0.0.1"
+    mode: "0640"
+  become: true
+  notify: Restart mysql
+
+# ---------------------------------------------------------------------------
+# 2. Enable general query logging to a file (feeds Wazuh)
+# ---------------------------------------------------------------------------
+- name: MySQL — enable general query log
+  community.general.ini_file:
+    path: /etc/mysql/mysql.conf.d/mysqld.cnf
+    section: mysqld
+    option: "{{ item.option }}"
+    value: "{{ item.value }}"
+    mode: "0640"
+  loop:
+    - { option: general_log,      value: "1" }
+    - { option: general_log_file, value: "/var/log/mysql/mysql-general.log" }
+    - { option: log_error,        value: "/var/log/mysql/error.log" }
+  become: true
+  when: mysql_harden_enable_logging
+  notify: Restart mysql
+
+# ---------------------------------------------------------------------------
+# 3. Restrict FILE privilege (prevent LOAD DATA INFILE / INTO OUTFILE abuse)
+# ---------------------------------------------------------------------------
+- name: MySQL — set secure_file_priv to empty (disable file operations)
+  community.general.ini_file:
+    path: /etc/mysql/mysql.conf.d/mysqld.cnf
+    section: mysqld
+    option: secure_file_priv
+    value: ""
+  become: true
+  notify: Restart mysql
+
+# ---------------------------------------------------------------------------
+# 4. Drop anonymous users and test database
+# ---------------------------------------------------------------------------
+- name: MySQL — remove anonymous users
+  ansible.builtin.command: >
+    mysql -e "DELETE FROM mysql.user WHERE User=''; FLUSH PRIVILEGES;"
+  become: true
+  changed_when: false
+
+- name: MySQL — drop test database
+  ansible.builtin.command: >
+    mysql -e "DROP DATABASE IF EXISTS test; DELETE FROM mysql.db WHERE Db='test' OR Db='test\\_%'; FLUSH PRIVILEGES;"
+  become: true
+  changed_when: false
+
+# ---------------------------------------------------------------------------
+# 5. Rotate MySQL root password
+# ---------------------------------------------------------------------------
+- name: MySQL — rotate root password
+  ansible.builtin.command: >
+    mysql -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '{{ mysql_harden_root_password }}'; FLUSH PRIVILEGES;"
+  become: true
+  no_log: true
+  when: mysql_harden_root_password | length > 0
+
+# ---------------------------------------------------------------------------
+# 6. Remove remote root logins
+# ---------------------------------------------------------------------------
+- name: MySQL — remove remote root logins
+  ansible.builtin.command: >
+    mysql -e "DELETE FROM mysql.user
+              WHERE User='root' AND Host NOT IN ('localhost','127.0.0.1','::1');
+              FLUSH PRIVILEGES;"
+  become: true
+  changed_when: false
+
+# ---------------------------------------------------------------------------
+# 7. Revoke dangerous privileges from non-root users
+# ---------------------------------------------------------------------------
+- name: MySQL — revoke dangerous privileges from non-root users
+  ansible.builtin.command: >
+    mysql -e "UPDATE mysql.user
+              SET File_priv='N', Super_priv='N', Process_priv='N',
+                  Shutdown_priv='N', Create_user_priv='N'
+              WHERE User NOT IN ('root','mysql.sys','mysql.session','mysql.infoschema')
+              AND User != '';
+              FLUSH PRIVILEGES;"
+  become: true
+  changed_when: false
+
+# ---------------------------------------------------------------------------
+# 8. Disable local_infile and symbolic-links in config
+# ---------------------------------------------------------------------------
+- name: MySQL — disable local_infile in config
+  community.general.ini_file:
+    path: /etc/mysql/mysql.conf.d/mysqld.cnf
+    section: mysqld
+    option: local-infile
+    value: "0"
+    mode: "0640"
+  become: true
+  notify: Restart mysql
+
+- name: MySQL — disable symbolic-links in config
+  community.general.ini_file:
+    path: /etc/mysql/mysql.conf.d/mysqld.cnf
+    section: mysqld
+    option: symbolic-links
+    value: "0"
+    mode: "0640"
+  become: true
+  notify: Restart mysql
+
+- name: MySQL — disable local_infile at runtime
+  ansible.builtin.command: mysql -e "SET GLOBAL local_infile = 0;"
+  become: true
+  changed_when: false
+  failed_when: false
+
+# ---------------------------------------------------------------------------
+# 9. Harden config file permissions
+# ---------------------------------------------------------------------------
+- name: MySQL — find MySQL config files
+  ansible.builtin.find:
+    paths:
+      - /etc/mysql
+    patterns: "*.cnf"
+    recurse: true
+  register: _mysql_conf_files
+  become: true
+
+- name: MySQL — set config file permissions to 640
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    mode: "0640"
+  loop: "{{ _mysql_conf_files.files }}"
+  become: true
+  failed_when: false

@@ -1,0 +1,88 @@
+---
+# ---------------------------------------------------------------------------
+# 1. Stop and disable Default Web Site (not needed on a pure FTP server)
+# ---------------------------------------------------------------------------
+- name: IIS FTP — Stop Default Web Site if running
+  ansible.windows.win_shell: |
+    Import-Module WebAdministration -ErrorAction Stop
+    $site = Get-Website -Name "Default Web Site" -ErrorAction SilentlyContinue
+    if ($site -and $site.State -eq "Started") {
+        Stop-Website -Name "Default Web Site"
+        Set-ItemProperty "IIS:\Sites\Default Web Site" -Name serverAutoStart -Value $false
+        Write-Output "stopped"
+    } else {
+        Write-Output "noop"
+    }
+  register: _iis_ftp_default_site
+  changed_when: "'stopped' in _iis_ftp_default_site.stdout"
+  when: iis_ftp_stop_default_website
+
+# ---------------------------------------------------------------------------
+# 2. Disable Anonymous FTP Authentication
+# ---------------------------------------------------------------------------
+- name: IIS FTP — Disable Anonymous Authentication on FTP site
+  ansible.windows.win_shell: |
+    Import-Module WebAdministration -ErrorAction Stop
+    $current = (Get-WebConfigurationProperty `
+        -Filter "/system.ftpServer/security/authentication/anonymousAuthentication" `
+        -Name enabled `
+        -Location "{{ iis_ftp_site_name }}" `
+        -ErrorAction SilentlyContinue).Value
+    if ($current -ne $false) {
+        Set-WebConfigurationProperty `
+            -Filter "/system.ftpServer/security/authentication/anonymousAuthentication" `
+            -Name enabled `
+            -Value $false `
+            -Location "{{ iis_ftp_site_name }}"
+        Write-Output "changed"
+    } else {
+        Write-Output "noop"
+    }
+  register: _iis_ftp_anon_auth
+  changed_when: "'changed' in _iis_ftp_anon_auth.stdout"
+  when: iis_ftp_disable_anonymous_auth
+
+# ---------------------------------------------------------------------------
+# 3. Remove Anonymous FTP Authorization rules
+# ---------------------------------------------------------------------------
+- name: IIS FTP — Remove Anonymous FTP Authorization rules
+  ansible.windows.win_shell: |
+    Import-Module WebAdministration -ErrorAction Stop
+    $rules = Get-WebConfiguration `
+        -Filter "/system.ftpServer/security/authorization" `
+        -Location "{{ iis_ftp_site_name }}" `
+        -ErrorAction SilentlyContinue
+    $removed = 0
+    $rules | Where-Object { $_.users -eq "?" -or $_.roles -eq "" -and $_.users -eq "" } | ForEach-Object {
+        Remove-WebConfigurationLock `
+            -Filter "/system.ftpServer/security/authorization[@users='?']" `
+            -Location "{{ iis_ftp_site_name }}" `
+            -ErrorAction SilentlyContinue
+        Clear-WebConfiguration `
+            -Filter "/system.ftpServer/security/authorization[@users='?']" `
+            -Location "{{ iis_ftp_site_name }}" `
+            -ErrorAction SilentlyContinue
+        $removed++
+    }
+    if ($removed -gt 0) { Write-Output "changed" } else { Write-Output "noop" }
+  register: _iis_ftp_anon_authz
+  changed_when: "'changed' in _iis_ftp_anon_authz.stdout"
+  when: iis_ftp_remove_anonymous_authz
+
+# ---------------------------------------------------------------------------
+# 4. Remove SMB share if configured
+# ---------------------------------------------------------------------------
+- name: IIS FTP — Remove SMB share on FTP root
+  ansible.windows.win_shell: |
+    $share = Get-SmbShare -Name "{{ iis_ftp_smb_share_name }}" -ErrorAction SilentlyContinue
+    if ($share) {
+        Remove-SmbShare -Name "{{ iis_ftp_smb_share_name }}" -Force
+        Write-Output "removed"
+    } else {
+        Write-Output "noop"
+    }
+  register: _iis_ftp_smb
+  changed_when: "'removed' in _iis_ftp_smb.stdout"
+  when:
+    - iis_ftp_disable_smb_share
+    - iis_ftp_smb_share_name | length > 0

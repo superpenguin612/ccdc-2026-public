@@ -1,0 +1,16 @@
+---
+- name: Copy Win32-OpenSSH MSI
+  ansible.windows.win_copy:
+    src: OpenSSH-Win64-v10.0.0.0.msi
+    dest: 'C:\Windows\Temp\OpenSSH-Win64.msi'
+
+- name: Install Win32-OpenSSH MSI
+  ansible.windows.win_package:
+    path: 'C:\Windows\Temp\OpenSSH-Win64.msi'
+    state: present
+
+- name: Start sshd once to generate default sshd_config
+  ansible.windows.win_service:
+    name: sshd
+    state: started
+  ignore_errors: yes

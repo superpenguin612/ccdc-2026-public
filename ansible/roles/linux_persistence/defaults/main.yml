@@ -1,0 +1,12 @@
+---
+linux_persistence_output_dir: "{{ artifact_root }}/linux_persistence"
+
+# Regex pattern searched across all cron files and shell profiles
+linux_persistence_suspicious_pattern: >-
+  /dev/tcp|/dev/udp|nc\s+-|ncat\s+|bash\s+-i|sh\s+-i|python[23]?\s+-c|
+  perl\s+-e|ruby\s+-e|php\s+-r|lua\s+-e|
+  curl[^|]*\|\s*ba?sh|wget[^|]*\|\s*ba?sh|
+  mkfifo|mknod[^|]+\bp\b|openssl\s+s_client|
+  xterm.*DISPLAY|LD_PRELOAD|chmod[^|]*\+s|
+  base64.*-d|base64.*--decode|eval.*\$\(|exec.*\$\(|
+  /tmp/\.[^/]|/var/tmp/\.[^/]|cmd=

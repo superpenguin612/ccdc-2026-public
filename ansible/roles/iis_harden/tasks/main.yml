@@ -1,0 +1,149 @@
+---
+# ---------------------------------------------------------------------------
+# 1. Remove default IIS content and sample apps
+# ---------------------------------------------------------------------------
+- name: IIS — remove default iisstart.htm and welcome page
+  ansible.windows.win_file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - C:\inetpub\wwwroot\iisstart.htm
+    - C:\inetpub\wwwroot\iisstart.png
+    - C:\inetpub\wwwroot\web.config
+  failed_when: false
+
+# ---------------------------------------------------------------------------
+# 2. Remove server version headers (X-Powered-By, Server)
+# ---------------------------------------------------------------------------
+- name: IIS — remove X-Powered-By header globally
+  ansible.windows.win_shell: |
+    Import-Module WebAdministration -ErrorAction Stop
+    $filter = "system.webServer/httpProtocol/customHeaders"
+    $header = Get-WebConfigurationProperty -Filter $filter -Name "." -PSPath "IIS:\" |
+              Select-Object -ExpandProperty Collection |
+              Where-Object { $_.name -eq "X-Powered-By" }
+    if ($header) {
+        Remove-WebConfigurationProperty -Filter $filter -Name "." -AtElement @{name="X-Powered-By"} -PSPath "IIS:\"
+        Write-Output "changed"
+    } else {
+        Write-Output "noop"
+    }
+  register: _iis_xpb
+  changed_when: "'changed' in _iis_xpb.stdout"
+  when: iis_harden_remove_version_headers
+
+- name: IIS — suppress Server header (removeServerHeader)
+  ansible.windows.win_shell: |
+    Import-Module WebAdministration -ErrorAction Stop
+    $current = (Get-WebConfigurationProperty `
+        -Filter "system.webServer/security/requestFiltering" `
+        -Name "removeServerHeader" `
+        -PSPath "IIS:\" -ErrorAction SilentlyContinue).Value
+    if ($current -ne $true) {
+        Set-WebConfigurationProperty `
+            -Filter "system.webServer/security/requestFiltering" `
+            -Name "removeServerHeader" `
+            -Value $true `
+            -PSPath "IIS:\"
+        Write-Output "changed"
+    } else {
+        Write-Output "noop"
+    }
+  register: _iis_svr
+  changed_when: "'changed' in _iis_svr.stdout"
+  when: iis_harden_remove_version_headers
+
+# ---------------------------------------------------------------------------
+# 3. Request filtering — limits and blocked extensions
+# ---------------------------------------------------------------------------
+- name: IIS — set request filtering limits
+  ansible.windows.win_shell: |
+    Import-Module WebAdministration -ErrorAction Stop
+    Set-WebConfigurationProperty `
+        -Filter "system.webServer/security/requestFiltering/requestLimits" `
+        -Name "maxUrl" `
+        -Value {{ iis_harden_max_url_length }} `
+        -PSPath "IIS:\"
+    Set-WebConfigurationProperty `
+        -Filter "system.webServer/security/requestFiltering/requestLimits" `
+        -Name "maxQueryString" `
+        -Value {{ iis_harden_max_query_string }} `
+        -PSPath "IIS:\"
+    Write-Output "changed"
+  register: _iis_req_limits
+  changed_when: "'changed' in _iis_req_limits.stdout"
+  when: iis_harden_set_request_limits
+
+- name: IIS — block dangerous file extensions
+  ansible.windows.win_shell: |
+    Import-Module WebAdministration -ErrorAction Stop
+    $ext = "{{ item }}"
+    $filter = "system.webServer/security/requestFiltering/fileExtensions"
+    $existing = Get-WebConfigurationProperty -Filter $filter -Name "." -PSPath "IIS:\" |
+                Select-Object -ExpandProperty Collection |
+                Where-Object { $_.fileExtension -eq $ext }
+    if (-not $existing) {
+        Add-WebConfigurationProperty -Filter $filter -Name "." `
+            -Value @{fileExtension=$ext; allowed=$false} -PSPath "IIS:\"
+        Write-Output "changed"
+    } else {
+        Write-Output "noop"
+    }
+  register: _iis_blocked_ext
+  changed_when: "'changed' in _iis_blocked_ext.stdout"
+  loop: "{{ iis_harden_blocked_extensions }}"
+  when: iis_harden_block_extensions
+
+# ---------------------------------------------------------------------------
+# 4. Disable WebDAV if present
+# ---------------------------------------------------------------------------
+- name: IIS — disable WebDAV module if installed
+  ansible.windows.win_shell: |
+    Import-Module WebAdministration -ErrorAction Stop
+    $webdav = Get-WebConfiguration -Filter "system.webServer/modules/add[@name='WebDAVModule']" -PSPath "IIS:\" -ErrorAction SilentlyContinue
+    if ($webdav) {
+        Remove-WebConfiguration -Filter "system.webServer/modules/add[@name='WebDAVModule']" -PSPath "IIS:\" -ErrorAction SilentlyContinue
+        Write-Output "changed"
+    } else {
+        Write-Output "noop"
+    }
+  register: _iis_webdav
+  changed_when: "'changed' in _iis_webdav.stdout"
+  failed_when: false
+  when: iis_harden_disable_webdav
+
+# ---------------------------------------------------------------------------
+# 5. Enable IIS logging with W3C extended fields
+# ---------------------------------------------------------------------------
+- name: IIS — enable W3C logging with extended fields on Default Web Site
+  ansible.windows.win_shell: |
+    Import-Module WebAdministration -ErrorAction Stop
+    Set-WebConfigurationProperty `
+        -Filter "system.applicationHost/sites/site[@name='{{ iis_harden_site_name }}']/logFile" `
+        -Name "logExtFileFlags" `
+        -Value "Date,Time,ClientIP,UserName,SiteName,ComputerName,ServerIP,Method,UriStem,UriQuery,HttpStatus,Win32Status,BytesSent,BytesRecv,TimeTaken,ServerPort,UserAgent,Cookie,Referer,ProtocolVersion,Host,HttpSubStatus" `
+        -PSPath "IIS:\"
+    Set-WebConfigurationProperty `
+        -Filter "system.applicationHost/sites/site[@name='{{ iis_harden_site_name }}']/logFile" `
+        -Name "enabled" `
+        -Value $true `
+        -PSPath "IIS:\"
+    Write-Output "changed"
+  register: _iis_logging
+  changed_when: "'changed' in _iis_logging.stdout"
+  when: iis_harden_enable_logging
+
+# ---------------------------------------------------------------------------
+# 6. Set application pool identity (NetworkService → ApplicationPoolIdentity)
+# ---------------------------------------------------------------------------
+- name: IIS — set app pool identity to ApplicationPoolIdentity
+  ansible.windows.win_shell: |
+    Import-Module WebAdministration -ErrorAction Stop
+    $pool = "{{ iis_harden_app_pool_name }}"
+    $current = (Get-ItemProperty "IIS:\AppPools\$pool\processModel" -Name userName -ErrorAction SilentlyContinue)
+    Set-ItemProperty "IIS:\AppPools\$pool" -Name processModel.identityType -Value 4
+    Write-Output "changed"
+  register: _iis_pool_id
+  changed_when: "'changed' in _iis_pool_id.stdout"
+  failed_when: false
+  when: iis_harden_set_pool_identity

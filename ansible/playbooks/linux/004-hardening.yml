@@ -1,0 +1,30 @@
+---
+# Run after 000-change-passwords.yml (requires SSH key auth to be working)
+# Applies OS hardening and host-based firewall rules to all Linux hosts.
+#
+# Usage:
+#   ansible-playbook playbooks/linux/002-harden-linux.yml
+
+# - name: Harden Linux hosts
+#   hosts: linux
+#   gather_facts: true
+#   roles:
+#     - linux_hardening
+
+- name: Disable screen lock on controller
+  hosts: controller
+  gather_facts: true
+  roles:
+    - linux_no_screenlock
+
+- name: Deploy sshesame honeypot
+  hosts: linux:!controller
+  gather_facts: true
+  roles:
+    - sshesame_honeypot
+
+- name: Git checkpoints (initial state capture for change detection)
+  hosts: linux
+  gather_facts: false
+  roles:
+    - linux_git_checkpoint

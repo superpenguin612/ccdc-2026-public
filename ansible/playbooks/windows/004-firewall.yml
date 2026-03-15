@@ -1,0 +1,12 @@
+---
+# Apply host-based firewall rules to all Windows hosts.
+# Run after 002-hardening-windows.yml.
+#
+# Usage:
+#   ansible-playbook playbooks/windows/002b-firewall-windows.yml
+
+- name: Apply Windows firewall rules
+  hosts: windows
+  gather_facts: false
+  roles:
+    - win_firewall

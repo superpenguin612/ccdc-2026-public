@@ -1,0 +1,41 @@
+---
+- name: Postfix — stop services before restore
+  ansible.builtin.service:
+    name: "{{ item }}"
+    state: stopped
+  loop: [postfix, dovecot]
+  become: true
+  failed_when: false
+
+- name: Postfix — wipe and restore /etc/postfix from local backup
+  ansible.builtin.shell: |
+    rm -rf /etc/postfix
+    tar -xzf {{ linux_backup_root }}/postfix/postfix_config.tar.gz -C /
+  become: true
+
+- name: Postfix — wipe and restore /etc/dovecot from local backup
+  ansible.builtin.shell: |
+    rm -rf /etc/dovecot
+    tar -xzf {{ linux_backup_root }}/postfix/dovecot_config.tar.gz -C /
+  become: true
+  failed_when: false
+
+- name: Postfix — wipe and restore spool from local backup
+  ansible.builtin.shell: |
+    rm -rf /var/spool/postfix
+    tar -xzf {{ linux_backup_root }}/postfix/postfix_spool.tar.gz -C /
+  become: true
+  failed_when: false
+
+- name: Postfix — restore /var/mail from local backup
+  ansible.builtin.shell: tar -xzf {{ linux_backup_root }}/postfix/varmail.tar.gz -C /
+  become: true
+  failed_when: false
+
+- name: Postfix — start services
+  ansible.builtin.service:
+    name: "{{ item }}"
+    state: started
+    enabled: true
+  loop: [postfix, dovecot]
+  become: true

@@ -1,0 +1,288 @@
+---
+# ---------------------------------------------------------------------------
+# firewalld — RedHat/Fedora/Oracle Linux hosts (fedora-webmail, splunk)
+#
+# Strategy: build all rules into a fresh 'ccdc' zone (permanent, not yet
+# active), then atomically switch the default zone and reload at the end.
+# The existing default zone stays in effect throughout — no lockout risk.
+# ---------------------------------------------------------------------------
+
+- name: Ensure firewalld is running
+  ansible.builtin.service:
+    name: firewalld
+    state: started
+    enabled: true
+  become: true
+
+# ---------------------------------------------------------------------------
+# Create ccdc zone if needed, then flush to clean slate
+# ---------------------------------------------------------------------------
+- name: Create ccdc zone if it does not exist
+  ansible.builtin.command: firewall-cmd --permanent --new-zone=ccdc
+  become: true
+  register: _new_zone
+  failed_when: _new_zone.rc != 0 and 'NAME_CONFLICT' not in _new_zone.stderr
+  changed_when: _new_zone.rc == 0
+
+- name: Set ccdc zone target to DROP (deny inbound by default)
+  ansible.builtin.command: firewall-cmd --permanent --zone=ccdc --set-target=DROP
+  become: true
+
+- name: Flush all ports from ccdc zone (clean slate)
+  ansible.builtin.shell: |
+    for port in $(firewall-cmd --permanent --zone=ccdc --list-ports); do
+      firewall-cmd --permanent --zone=ccdc --remove-port="$port"
+    done
+  become: true
+
+- name: Flush all services from ccdc zone (clean slate)
+  ansible.builtin.shell: |
+    for svc in $(firewall-cmd --permanent --zone=ccdc --list-services); do
+      firewall-cmd --permanent --zone=ccdc --remove-service="$svc"
+    done
+  become: true
+
+- name: Flush all rich rules from ccdc zone (clean slate)
+  ansible.builtin.shell: |
+    firewall-cmd --permanent --zone=ccdc --list-rich-rules 2>/dev/null | grep -v '^$' | while IFS= read -r rule; do
+      firewall-cmd --permanent --zone=ccdc --remove-rich-rule="$rule"
+    done; exit 0
+  become: true
+
+- name: Flush all permanent direct rules (clean slate for outbound)
+  ansible.builtin.shell: |
+    firewall-cmd --permanent --direct --remove-all-rules 2>/dev/null; exit 0
+  become: true
+
+# ---------------------------------------------------------------------------
+# Always-on inbound rules — build into ccdc zone (permanent, not yet active)
+# ---------------------------------------------------------------------------
+
+# Put the loopback interface into the trusted zone so local services work
+- name: Assign loopback interface to trusted zone
+  ansible.posix.firewalld:
+    zone: trusted
+    interface: lo
+    state: enabled
+    permanent: true
+  become: true
+
+- name: Allow ICMP echo inbound (ping — scoring)
+  ansible.builtin.command: >
+    firewall-cmd --permanent --zone=ccdc
+    --add-rich-rule='rule icmp-type name="echo-request" accept'
+  become: true
+  when: linux_firewall_allow_icmp
+
+- name: Allow SSH management inbound (TCP {{ linux_firewall_ssh_port }})
+  ansible.builtin.command: >
+    firewall-cmd --permanent --zone=ccdc --add-port={{ linux_firewall_ssh_port }}/tcp
+  become: true
+
+- name: Allow SSH honeypot inbound (TCP {{ linux_firewall_honeypot_port }} — cowrie)
+  ansible.builtin.command: >
+    firewall-cmd --permanent --zone=ccdc --add-port={{ linux_firewall_honeypot_port }}/tcp
+  become: true
+
+# ---------------------------------------------------------------------------
+# Service-based inbound rules — keyed on fw_ group membership
+# ---------------------------------------------------------------------------
+
+# --- HTTP ---
+- name: Allow HTTP inbound (TCP 80)
+  ansible.builtin.command: firewall-cmd --permanent --zone=ccdc --add-port=80/tcp
+  become: true
+  when: inventory_hostname in groups['fw_http']
+
+# --- HTTPS ---
+- name: Allow HTTPS inbound (TCP 443)
+  ansible.builtin.command: firewall-cmd --permanent --zone=ccdc --add-port=443/tcp
+  become: true
+  when: inventory_hostname in groups['fw_https']
+
+# --- SMTP / SMTPS / Submission ---
+- name: Allow SMTP inbound (smtp, smtps, submission services)
+  ansible.builtin.command: firewall-cmd --permanent --zone=ccdc --add-service={{ item }}
+  loop: [smtp, smtps, smtp-submission]
+  become: true
+  when: inventory_hostname in groups['fw_smtp']
+
+# --- POP3 / POP3S ---
+- name: Allow POP3 inbound (pop3, pop3s services)
+  ansible.builtin.command: firewall-cmd --permanent --zone=ccdc --add-service={{ item }}
+  loop: [pop3, pop3s]
+  become: true
+  when: inventory_hostname in groups['fw_pop3']
+
+# --- IMAP ---
+- name: Allow IMAP inbound (TCP 143)
+  ansible.builtin.command: firewall-cmd --permanent --zone=ccdc --add-port=143/tcp
+  become: true
+  when: inventory_hostname in groups['fw_imap']
+
+# --- FTP ---
+- name: Allow FTP control inbound (TCP 21)
+  ansible.builtin.command: firewall-cmd --permanent --zone=ccdc --add-port=21/tcp
+  become: true
+  when: inventory_hostname in groups['fw_ftp']
+
+- name: Allow FTP active data inbound (TCP 20)
+  ansible.builtin.command: firewall-cmd --permanent --zone=ccdc --add-port=20/tcp
+  become: true
+  when: inventory_hostname in groups['fw_ftp']
+
+- name: Allow FTP passive data inbound (TCP {{ linux_firewall_ftp_passive_start }}-{{ linux_firewall_ftp_passive_end }})
+  ansible.builtin.command: >
+    firewall-cmd --permanent --zone=ccdc
+    --add-port={{ linux_firewall_ftp_passive_start }}-{{ linux_firewall_ftp_passive_end }}/tcp
+  become: true
+  when: inventory_hostname in groups['fw_ftp']
+
+# --- DNS ---
+- name: Allow DNS inbound (TCP + UDP 53)
+  ansible.builtin.command: firewall-cmd --permanent --zone=ccdc --add-port=53/{{ item }}
+  loop: [tcp, udp]
+  become: true
+  when: inventory_hostname in groups['fw_dns']
+
+# --- Splunk ---
+- name: Allow Splunk web inbound (TCP 8000)
+  ansible.builtin.command: firewall-cmd --permanent --zone=ccdc --add-port=8000/tcp
+  become: true
+  when: inventory_hostname in groups['fw_splunk']
+
+- name: Allow Splunk forwarder inbound (TCP 9997)
+  ansible.builtin.command: firewall-cmd --permanent --zone=ccdc --add-port=9997/tcp
+  become: true
+  when: inventory_hostname in groups['fw_splunk']
+
+# --- NTP ---
+- name: Allow NTP inbound (UDP 123)
+  ansible.builtin.command: firewall-cmd --permanent --zone=ccdc --add-port=123/udp
+  become: true
+  when: inventory_hostname in groups['fw_ntp']
+
+# --- TFTP ---
+- name: Allow TFTP inbound (UDP 69)
+  ansible.builtin.command: firewall-cmd --permanent --zone=ccdc --add-port=69/udp
+  become: true
+  when: inventory_hostname in groups['fw_tftp']
+
+# --- Wazuh ---
+- name: Allow Wazuh agent comms inbound (TCP 1514-1515)
+  ansible.builtin.command: firewall-cmd --permanent --zone=ccdc --add-port={{ item }}/tcp
+  loop: ["1514", "1515"]
+  become: true
+  when: inventory_hostname in groups['fw_wazuh']
+
+- name: Allow Wazuh web UI inbound (TCP 443)
+  ansible.builtin.command: firewall-cmd --permanent --zone=ccdc --add-port=443/tcp
+  become: true
+  when: inventory_hostname in groups['fw_wazuh']
+
+- name: Allow syslog inbound from Palo Alto (UDP 514)
+  ansible.builtin.command: firewall-cmd --permanent --zone=ccdc --add-port=514/udp
+  become: true
+  when: inventory_hostname in groups['fw_wazuh']
+
+# ---------------------------------------------------------------------------
+# Outbound rules via direct iptables (firewalld zones only control inbound)
+# Drop all outbound by default, then whitelist.
+# ---------------------------------------------------------------------------
+- name: Add direct rule — drop all outbound by default (IPv4)
+  ansible.builtin.command: >
+    firewall-cmd --permanent --direct --add-rule ipv4 filter OUTPUT 900 -j DROP
+  become: true
+
+- name: Add direct rule — drop all outbound by default (IPv6)
+  ansible.builtin.command: >
+    firewall-cmd --permanent --direct --add-rule ipv6 filter OUTPUT 900 -j DROP
+  become: true
+
+- name: Allow loopback outbound (direct)
+  ansible.builtin.command: >
+    firewall-cmd --permanent --direct --add-rule ipv4 filter OUTPUT 10 -o lo -j ACCEPT
+  become: true
+
+- name: Allow established/related outbound (direct)
+  ansible.builtin.command: >
+    firewall-cmd --permanent --direct --add-rule ipv4 filter OUTPUT 20
+    -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+  become: true
+
+- name: Allow DNS outbound UDP 53 (direct)
+  ansible.builtin.command: >
+    firewall-cmd --permanent --direct --add-rule ipv4 filter OUTPUT 30
+    -p udp --dport 53 -j ACCEPT
+  become: true
+
+- name: Allow DNS outbound TCP 53 (direct)
+  ansible.builtin.command: >
+    firewall-cmd --permanent --direct --add-rule ipv4 filter OUTPUT 30
+    -p tcp --dport 53 -j ACCEPT
+  become: true
+
+- name: Allow NTP outbound UDP 123 (direct)
+  ansible.builtin.command: >
+    firewall-cmd --permanent --direct --add-rule ipv4 filter OUTPUT 30
+    -p udp --dport 123 -j ACCEPT
+  become: true
+
+- name: Allow HTTP outbound TCP 80 (direct)
+  ansible.builtin.command: >
+    firewall-cmd --permanent --direct --add-rule ipv4 filter OUTPUT 30
+    -p tcp --dport 80 -j ACCEPT
+  become: true
+
+- name: Allow HTTPS outbound TCP 443 (direct)
+  ansible.builtin.command: >
+    firewall-cmd --permanent --direct --add-rule ipv4 filter OUTPUT 30
+    -p tcp --dport 443 -j ACCEPT
+  become: true
+
+- name: Allow Splunk forwarder outbound TCP 9997 (direct)
+  ansible.builtin.command: >
+    firewall-cmd --permanent --direct --add-rule ipv4 filter OUTPUT 30
+    -p tcp --dport 9997 -j ACCEPT
+  become: true
+
+- name: Allow Wazuh agent outbound TCP 1514 (direct)
+  ansible.builtin.command: >
+    firewall-cmd --permanent --direct --add-rule ipv4 filter OUTPUT 30
+    -p tcp --dport 1514 -j ACCEPT
+  become: true
+
+- name: Allow Wazuh agent outbound TCP 1515 (direct)
+  ansible.builtin.command: >
+    firewall-cmd --permanent --direct --add-rule ipv4 filter OUTPUT 30
+    -p tcp --dport 1515 -j ACCEPT
+  become: true
+
+- name: Allow SMTP/SMTPS outbound (direct — mail relay)
+  ansible.builtin.command: >
+    firewall-cmd --permanent --direct --add-rule ipv4 filter OUTPUT 30
+    -p tcp --dport {{ item }} -j ACCEPT
+  loop: ["25", "465", "587"]
+  become: true
+  when: inventory_hostname in groups['fw_smtp']
+
+# ---------------------------------------------------------------------------
+# Atomically switch to ccdc zone — one reload, existing zone active until here
+# ---------------------------------------------------------------------------
+- name: Reload firewalld to load ccdc zone into runtime
+  ansible.builtin.command: firewall-cmd --reload
+  become: true
+  changed_when: false
+
+- name: Set default zone to ccdc (zone must be loaded in runtime first)
+  ansible.builtin.command: firewall-cmd --set-default-zone=ccdc
+  become: true
+  changed_when: false
+
+- name: Move all non-loopback interfaces into ccdc zone at runtime
+  ansible.builtin.shell: |
+    for iface in $(firewall-cmd --get-active-zones | awk '/^ /{print $1}' | grep -v lo); do
+      firewall-cmd --zone=ccdc --change-interface="$iface" 2>/dev/null || true
+    done
+  become: true
+  changed_when: false

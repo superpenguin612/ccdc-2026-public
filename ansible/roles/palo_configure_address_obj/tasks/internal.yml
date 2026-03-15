@@ -1,0 +1,13 @@
+---
+- name: Create Internal Address Object
+  paloaltonetworks.panos.panos_address_object:
+    provider: "{{ panos_provider }}"
+    name: "Internal_{{ hostvars[host_item]['inventory_hostname'] }}"
+    value: "{{ hostvars[host_item]['ip_internal'] }}"
+  loop: "{{ groups[protected_group] | default([]) }}"
+  loop_control:
+    loop_var: host_item
+  when:
+    - hostvars[host_item]['ip_internal'] is defined
+    - hostvars[host_item]['ip_internal'] != "DHCP"
+

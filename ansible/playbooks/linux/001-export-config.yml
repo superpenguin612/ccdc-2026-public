@@ -1,0 +1,7 @@
+---
+- name: Export information from Linux hosts
+  hosts: linux
+  roles:
+    - service_backup
+    - linux_collect_info
+    - linux_git_checkpoint

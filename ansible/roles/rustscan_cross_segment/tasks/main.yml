@@ -1,0 +1,118 @@
+---
+- name: Determine scanner platform from inventory groups
+  ansible.builtin.set_fact:
+    rustscan_is_windows_scanner: "{{ inventory_hostname in (groups['windows'] | default([])) }}"
+
+- name: Validate target selection inputs
+  ansible.builtin.assert:
+    that:
+      - rustscan_target_group | length > 0 or (rustscan_target_ips | length > 0)
+    fail_msg: "Set rustscan_target_group or rustscan_target_ips for rustscan_cross_segment."
+
+- name: Build target IP list from inventory group
+  ansible.builtin.set_fact:
+    rustscan_target_ips_effective: >-
+      {{
+        (rustscan_target_ips if (rustscan_target_ips | length > 0) else
+        (groups[rustscan_target_group] | default([])
+          | map('extract', hostvars)
+          | map(attribute='ip_internal')
+          | list))
+        | reject('equalto', '127.0.0.1')
+        | reject('equalto', '::1')
+        | reject('equalto', 'localhost')
+        | reject('equalto', 'DHCP')
+        | reject('equalto', '')
+        | list
+      }}
+
+- name: Ensure at least one scan target exists
+  ansible.builtin.assert:
+    that:
+      - rustscan_target_ips_effective | length > 0
+    fail_msg: "No valid targets resolved for rustscan scan."
+
+- name: Ensure local artifact directory exists on controller
+  ansible.builtin.file:
+    path: "{{ rustscan_artifact_dir }}"
+    state: directory
+    mode: "0700"
+  delegate_to: localhost
+  become: false
+
+# ---------------------------------------------------------------------------
+# Deploy bundled binary
+# ---------------------------------------------------------------------------
+- name: Copy bundled rustscan ELF to Linux scanner
+  ansible.builtin.copy:
+    src: "{{ rustscan_linux_source_exe }}"
+    dest: "{{ rustscan_linux_exe }}"
+    mode: "0755"
+  become: true
+  when: not rustscan_is_windows_scanner
+
+- name: Ensure rustscan install dir exists on Windows scanner
+  ansible.windows.win_file:
+    path: "{{ rustscan_windows_install_dir }}"
+    state: directory
+  when: rustscan_is_windows_scanner
+
+- name: Copy bundled rustscan.exe to Windows scanner
+  ansible.windows.win_copy:
+    src: "{{ rustscan_windows_source_exe }}"
+    dest: "{{ rustscan_windows_exe }}"
+  when: rustscan_is_windows_scanner
+
+# ---------------------------------------------------------------------------
+# Run scan
+# ---------------------------------------------------------------------------
+- name: Run rustscan from Linux scanner
+  ansible.builtin.command: >-
+    {{ rustscan_linux_exe }}
+    -a {{ rustscan_target_ips_effective | join(',') }}
+    -r {{ rustscan_port_range }}
+    --ulimit {{ rustscan_ulimit }}
+    --timeout {{ rustscan_timeout }}
+    -- {{ rustscan_nmap_args }}
+  register: rustscan_scan_output
+  changed_when: false
+  when: not rustscan_is_windows_scanner
+
+- name: Run rustscan from Windows scanner
+  ansible.windows.win_shell: |
+    & "{{ rustscan_windows_exe }}" `
+      -a "{{ rustscan_target_ips_effective | join(',') }}" `
+      -r "{{ rustscan_port_range }}" `
+      --ulimit {{ rustscan_ulimit }} `
+      --timeout {{ rustscan_timeout }} `
+      -- {{ rustscan_nmap_args }}
+  register: rustscan_scan_output
+  changed_when: false
+  when: rustscan_is_windows_scanner
+
+# ---------------------------------------------------------------------------
+# Save results
+# ---------------------------------------------------------------------------
+- name: Save rustscan output to controller artifact
+  ansible.builtin.copy:
+    content: |
+      scanner_host: {{ inventory_hostname }}
+      scanner_os: {{ 'windows' if rustscan_is_windows_scanner else 'linux' }}
+      target_group: {{ rustscan_target_group | default('explicit-list') }}
+      target_ips: {{ rustscan_target_ips_effective | join(', ') }}
+
+      --- rustscan stdout ---
+      {{ rustscan_scan_output.stdout | default('') }}
+
+      --- rustscan stderr ---
+      {{ rustscan_scan_output.stderr | default('') }}
+    dest: "{{ rustscan_artifact_dir }}/scan_{{ rustscan_target_group | default('explicit') }}.txt"
+    mode: "0600"
+  delegate_to: localhost
+  become: false
+
+- name: Print cross-segment scan summary
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }} scanned {{ rustscan_target_group | default('explicit targets') }}:
+      {{ rustscan_target_ips_effective | length }} hosts

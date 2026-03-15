@@ -1,0 +1,17 @@
+---
+- name: Cross-segment scan Windows hosts from Linux side
+  hosts: ubuntu-wkst
+  gather_facts: no
+  vars:
+    rustscan_target_group: windows
+  roles:
+    - role: rustscan_cross_segment
+
+- name: Cross-segment scan Linux hosts from Windows side
+  hosts: win11-wkst
+  gather_facts: no
+  vars:
+    rustscan_target_group: linux
+    use_winrm: false
+  roles:
+    - role: rustscan_cross_segment

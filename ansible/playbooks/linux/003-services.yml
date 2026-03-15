@@ -1,0 +1,42 @@
+---
+- name: Harden PHP on hosts with Apache/PHP-FPM
+  hosts: svc_apache2
+  gather_facts: false
+  roles:
+    - php_harden
+
+- name: Harden OpenCart
+  hosts: ubuntu-ecom
+  gather_facts: false
+  roles:
+    - opencart_harden
+
+- name: Harden Postfix
+  hosts: svc_postfix
+  gather_facts: false
+  roles:
+    - postfix_harden
+
+- name: Harden Dovecot
+  hosts: svc_postfix
+  gather_facts: false
+  roles:
+    - dovecot_harden
+
+- name: Harden MySQL
+  hosts: svc_mysql
+  gather_facts: false
+  roles:
+    - mysql_harden
+
+- name: Harden Splunk
+  hosts: svc_splunk
+  gather_facts: false
+  roles:
+    - splunk_harden
+
+- name: Scan for pre-planted webshells on web hosts
+  hosts: svc_apache2
+  gather_facts: false
+  roles:
+    - webshell_scan

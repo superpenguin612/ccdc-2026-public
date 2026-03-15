@@ -1,0 +1,15 @@
+---
+# Back up all scored service data to the Ansible controller.
+# Run this immediately after initial hardening to capture the clean state.
+#
+# Usage:
+#   ansible-playbook playbooks/backup-services.yml
+#   ansible-playbook playbooks/backup-services.yml --limit ubuntu-ecom
+#
+# Backups land in: ~/ccdc26/artifacts/service_backup/<hostname>/
+#
+- name: Back up all service data
+  hosts: linux:windows
+  gather_facts: true
+  roles:
+    - service_backup

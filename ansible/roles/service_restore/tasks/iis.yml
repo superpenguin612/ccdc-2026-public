@@ -1,0 +1,22 @@
+---
+- name: IIS — stop W3SVC
+  ansible.windows.win_service:
+    name: W3SVC
+    state: stopped
+
+- name: IIS — wipe and restore webroot from local backup
+  ansible.windows.win_shell: |
+    $dest = "{{ svc_iis_webroot }}"
+    if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
+    Expand-Archive -Path "{{ win_backup_root }}\iis\iis_webroot.zip" -DestinationPath (Split-Path $dest -Parent) -Force
+
+- name: IIS — wipe and restore IIS config from local backup
+  ansible.windows.win_shell: |
+    $dest = "{{ svc_iis_config_dir }}"
+    if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
+    Expand-Archive -Path "{{ win_backup_root }}\iis\iis_config.zip" -DestinationPath (Split-Path $dest -Parent) -Force
+
+- name: IIS — start W3SVC
+  ansible.windows.win_service:
+    name: W3SVC
+    state: started

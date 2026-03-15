@@ -1,0 +1,2 @@
+# Splunk admin password (vault.yml)
+splunk_harden_admin_password: "{{ vault_splunk_password }}"

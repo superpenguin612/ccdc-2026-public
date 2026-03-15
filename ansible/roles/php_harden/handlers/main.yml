@@ -1,0 +1,12 @@
+---
+- name: Restart PHP-FPM
+  ansible.builtin.service:
+    name: "{{ php_fpm_service }}"
+    state: restarted
+  become: true
+
+- name: Restart Apache2
+  ansible.builtin.service:
+    name: apache2
+    state: restarted
+  become: true

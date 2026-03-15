@@ -1,0 +1,13 @@
+wazuh_fim_extra_dirs:
+  - path: /var/www/html/opencart/upload
+
+# Site is HTTP-only — secure cookies would break sessions
+php_harden_session_cookie_secure: "0"
+
+# OpenCart credentials (vault.yml)
+opencart_db_password:    "{{ vault_opencart_db_password }}"
+opencart_admin_password: "{{ vault_opencart_admin_password }}"
+opencart_admin_dir:      "{{ vault_opencart_admin_dir }}"
+
+# MySQL root password (vault.yml)
+mysql_harden_root_password: "{{ vault_mysql_root_password }}"

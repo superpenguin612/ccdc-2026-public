@@ -1,0 +1,19 @@
+---
+# Directories to scan for webshells
+webshell_scan_paths:
+  - /var/www
+
+# File extensions to scan
+webshell_scan_extensions:
+  - "*.php"
+  - "*.php5"
+  - "*.php7"
+  - "*.phtml"
+  - "*.phar"
+  - "*.shtml"
+
+# Where to save the report on the controller
+webshell_scan_artifact_root: "{{ artifact_root | default('/tmp/ansible-artifacts') }}"
+
+# Quarantine suspicious files instead of just reporting (move to /tmp/quarantine)
+webshell_scan_quarantine: false

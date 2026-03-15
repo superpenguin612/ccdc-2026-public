@@ -1,0 +1,53 @@
+---
+# 001-setup-windows-ssh.yml
+#
+# Play 1 (controller):   Write the vault SSH private key to ~/.ssh/ansible_private_key.
+# Play 2 (WinRM):        Install OpenSSH, configure sshd_config, push public key, open firewall.
+# Play 3 (SSH + key):    Verify key auth works, then stop and disable WinRM.
+#
+# Usage:
+#   ansible-playbook playbooks/001-setup-windows-ssh.yml --ask-vault-pass
+
+- name: Write SSH private key to controller
+  hosts: ubuntu-wkst
+  gather_facts: no
+  tags: [write_key]
+  tasks:
+    - name: Ensure ~/.ssh exists
+      ansible.builtin.file:
+        path: ~/.ssh
+        state: directory
+        mode: "0700"
+
+    - name: Write vault_ssh_private_key to ~/.ssh/ansible_private_key
+      ansible.builtin.copy:
+        content: "{{ vault_ssh_private_key }}"
+        dest: ~/.ssh/ansible_private_key
+        mode: "0600"
+      no_log: true
+
+- name: Install and configure OpenSSH Server on Windows hosts
+  hosts: windows
+  gather_facts: no
+  tags: [setup_ssh]
+  vars:
+    use_winrm: true
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_port: 5985
+  roles:
+    - win_setup_ssh
+
+- name: Verify SSH key auth and disable WinRM
+  hosts: windows
+  gather_facts: no
+  tags: [disable_winrm]
+  vars:
+    ansible_connection: ssh
+    ansible_port: "{{ windows_ssh_port }}"
+    ansible_ssh_private_key_file: ~/.ssh/ansible_private_key
+    ansible_password: ~
+    ansible_shell_type: powershell
+  roles:
+    - win_disable_winrm

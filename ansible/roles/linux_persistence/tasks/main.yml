@@ -1,0 +1,536 @@
+---
+# ---------------------------------------------------------------------------
+# Phase 1: Scan — runs across all hosts in parallel, no prompts yet
+# ---------------------------------------------------------------------------
+- name: Create output directory on controller
+  ansible.builtin.file:
+    path: "{{ linux_persistence_output_dir }}/{{ inventory_hostname }}"
+    state: directory
+    mode: "0700"
+  delegate_to: localhost
+  become: false
+
+- name: Dump all crontab files
+  ansible.builtin.shell: |
+    find /etc/crontab /etc/cron.d /etc/cron.hourly /etc/cron.daily \
+         /etc/cron.weekly /etc/cron.monthly \
+         /var/spool/cron /var/spool/cron/crontabs \
+         -maxdepth 2 -type f 2>/dev/null | \
+    xargs -I{} bash -c 'echo "=== {} ==="; cat "{}"' 2>/dev/null || true
+  register: all_crontabs
+  changed_when: false
+  become: true
+
+- name: Save raw crontab dump to controller
+  ansible.builtin.copy:
+    content: "{{ all_crontabs.stdout }}"
+    dest: "{{ linux_persistence_output_dir }}/{{ inventory_hostname }}/crontabs.txt"
+    mode: "0600"
+  delegate_to: localhost
+  become: false
+
+- name: Search crontabs for suspicious patterns
+  ansible.builtin.shell: |
+    PATTERN='{{ linux_persistence_suspicious_pattern | regex_replace("\n", "") | regex_replace(" +", "") }}'
+    find /etc/crontab /etc/cron.d /etc/cron.hourly /etc/cron.daily \
+         /etc/cron.weekly /etc/cron.monthly \
+         /var/spool/cron /var/spool/cron/crontabs \
+         -maxdepth 2 -type f 2>/dev/null | \
+    xargs -I{} bash -c 'grep -Pn "$1" "$2" 2>/dev/null | sed "s|^|$2:|"' _ "$PATTERN" {} || true
+  register: suspicious_crons
+  changed_when: false
+  become: true
+
+- name: Search shell profiles for suspicious patterns
+  ansible.builtin.shell: |
+    PATTERN='{{ linux_persistence_suspicious_pattern | regex_replace("\n", "") | regex_replace(" +", "") }}'
+    find /home /root /etc/profile.d /etc/skel \
+         -maxdepth 3 \
+         \( -name '.bashrc' -o -name '.profile' -o -name '.bash_profile' \
+            -o -name '.zshrc' -o -name '.zprofile' -o -name '*.sh' \) \
+         2>/dev/null | \
+    xargs -I{} bash -c 'grep -Pn "$1" "$2" 2>/dev/null | sed "s|^|$2:|"' _ "$PATTERN" {} || true
+  register: suspicious_profiles
+  changed_when: false
+  become: true
+
+- name: Collect other persistence locations
+  ansible.builtin.shell: |
+    echo '=== /etc/rc.local ==='
+    cat /etc/rc.local 2>/dev/null || echo '(not present)'
+
+    echo '=== /etc/init.d/ scripts newer than /etc/passwd ==='
+    find /etc/init.d -type f -newer /etc/passwd 2>/dev/null || echo '(none)'
+
+    echo '=== SUID/SGID binaries not in /usr or /bin ==='
+    find / -xdev \( -perm -4000 -o -perm -2000 \) -type f 2>/dev/null | \
+      grep -Ev '^/(usr|bin|sbin|lib)' || echo '(none outside standard paths)'
+  register: other_persistence
+  changed_when: false
+  become: true
+
+- name: Collect user crontabs (per-user spool)
+  ansible.builtin.shell: |
+    for user in $(cut -d: -f1 /etc/passwd); do
+      ct=$(crontab -l -u "$user" 2>/dev/null)
+      [ -n "$ct" ] && echo "=== crontab: $user ===" && echo "$ct"
+    done
+    exit 0
+  register: user_crontabs
+  changed_when: false
+  become: true
+
+- name: Collect AT jobs
+  ansible.builtin.shell: |
+    if command -v atq &>/dev/null; then
+      echo '=== AT queue ==='
+      atq 2>/dev/null || echo '(empty)'
+      for job in $(atq 2>/dev/null | awk '{print $1}'); do
+        echo "--- at job $job ---"
+        at -c "$job" 2>/dev/null | tail -10
+      done
+    else
+      echo '(at not installed)'
+    fi
+  register: at_jobs
+  changed_when: false
+  failed_when: false
+  become: true
+
+- name: Collect systemd timers
+  ansible.builtin.shell: |
+    echo '=== Systemd timers ==='
+    systemctl list-timers --all --no-pager 2>/dev/null || echo '(systemd not available)'
+    echo '=== Custom timer files ==='
+    find /etc/systemd/system -name '*.timer' 2>/dev/null | \
+      xargs -I{} bash -c 'echo "--- {} ---"; cat "{}"' 2>/dev/null || echo '(none)'
+  register: systemd_timers
+  changed_when: false
+  failed_when: false
+  become: true
+
+- name: Collect systemd generators
+  ansible.builtin.shell: |
+    echo '=== Systemd generators ==='
+    for d in /etc/systemd/system-generators /usr/local/lib/systemd/system-generators; do
+      [ -d "$d" ] && ls -la "$d" 2>/dev/null && echo "(found in $d)"
+    done || echo '(none found)'
+  register: systemd_generators
+  changed_when: false
+  failed_when: false
+  become: true
+
+- name: Collect MOTD script audit
+  ansible.builtin.shell: |
+    PATTERN='{{ linux_persistence_suspicious_pattern | regex_replace("\n", "") | regex_replace(" +", "") }}'
+    echo '=== MOTD scripts ==='
+    for d in /etc/update-motd.d /etc/motd.d; do
+      [ -d "$d" ] || continue
+      for f in "$d"/*; do
+        [ -f "$f" ] || continue
+        echo "--- $f ---"
+        cat "$f"
+        if grep -qP "$PATTERN" "$f" 2>/dev/null; then
+          echo "  [SUSPICIOUS PATTERN FOUND]"
+        fi
+      done
+    done
+  register: motd_audit
+  changed_when: false
+  failed_when: false
+  become: true
+
+- name: Collect udev rules audit
+  ansible.builtin.shell: |
+    PATTERN='{{ linux_persistence_suspicious_pattern | regex_replace("\n", "") | regex_replace(" +", "") }}'
+    echo '=== Suspicious udev rules ==='
+    for f in /etc/udev/rules.d/*; do
+      [ -f "$f" ] || continue
+      if grep -qPE "(RUN|PROGRAM).*($PATTERN)" "$f" 2>/dev/null; then
+        echo "[SUSPICIOUS] $f"
+        grep -nPE "(RUN|PROGRAM)" "$f"
+      fi
+    done || echo '(none)'
+  register: udev_audit
+  changed_when: false
+  failed_when: false
+  become: true
+
+- name: Collect authorized_keys in unusual locations
+  ansible.builtin.shell: |
+    echo '=== Authorized keys in unusual locations ==='
+    find / -xdev -name 'authorized_keys' -o -name 'authorized_keys2' 2>/dev/null | \
+    while read -r kf; do
+      case "$kf" in
+        /home/*/.ssh/authorized_keys|/root/.ssh/authorized_keys) ;;
+        *) echo "[UNUSUAL] $kf"; cat "$kf" ;;
+      esac
+    done || echo '(none)'
+  register: unusual_authkeys
+  changed_when: false
+  failed_when: false
+  become: true
+
+- name: Collect file capabilities
+  ansible.builtin.shell: |
+    echo '=== File capabilities ==='
+    if command -v getcap &>/dev/null; then
+      getcap -r / 2>/dev/null | while read -r line; do
+        file=$(echo "$line" | awk '{print $1}')
+        caps=$(echo "$line" | cut -d'=' -f2-)
+        if echo "$caps" | grep -qiE '(cap_sys_admin|cap_setuid|cap_setgid|cap_sys_ptrace|cap_sys_module|cap_dac_override|cap_net_raw)'; then
+          echo "[DANGEROUS] $line"
+        else
+          echo "$line"
+        fi
+      done
+      echo '=== Capabilities in unusual locations ==='
+      for dir in /tmp /var/tmp /dev/shm /home /opt; do
+        [ -d "$dir" ] || continue
+        find "$dir" -type f 2>/dev/null | while read -r f; do
+          cap=$(getcap "$f" 2>/dev/null)
+          [ -n "$cap" ] && echo "[UNUSUAL] $cap"
+        done
+      done
+    else
+      echo '(getcap not available)'
+    fi
+  register: file_caps
+  changed_when: false
+  failed_when: false
+  become: true
+
+- name: Collect executables in temp directories
+  ansible.builtin.shell: |
+    echo '=== Executables in temp dirs ==='
+    for dir in /tmp /var/tmp /dev/shm; do
+      [ -d "$dir" ] || continue
+      find "$dir" -type f -executable 2>/dev/null | while read -r f; do
+        echo "[EXEC IN $dir] $f"
+        ls -la "$f"
+      done
+    done || echo '(none)'
+    echo '=== Hidden executables ==='
+    find /tmp /var/tmp /dev/shm /home /opt -name '.*' -type f -executable 2>/dev/null | \
+      while read -r f; do echo "[HIDDEN EXEC] $f"; done || echo '(none)'
+  register: temp_executables
+  changed_when: false
+  failed_when: false
+  become: true
+
+- name: Collect recently modified system executables (7 days)
+  ansible.builtin.shell: |
+    echo '=== Recently modified executables in system dirs (7 days) ==='
+    find /usr/bin /usr/sbin /usr/local/bin /bin /sbin /opt \
+      -type f -executable -mtime -7 2>/dev/null | \
+      while read -r f; do
+        echo "$(stat -c '%y %n' "$f" 2>/dev/null)"
+      done || echo '(none)'
+  register: recent_executables
+  changed_when: false
+  failed_when: false
+  become: true
+
+- name: PAM audit — pam_exec, nullok, pam_deny/permit swap, recent modifications
+  ansible.builtin.shell: |
+    echo '=== pam_exec.so entries (arbitrary command execution) ==='
+    grep -rn 'pam_exec\.so' /etc/pam.d/ 2>/dev/null | grep -v '^[[:space:]]*#' || echo '(none)'
+
+    echo '=== nullok entries (blank passwords allowed) ==='
+    grep -rn 'nullok' /etc/pam.d/ 2>/dev/null | grep -v '^[[:space:]]*#' || echo '(none)'
+
+    echo '=== pam_deny / pam_permit hash check ==='
+    PAM_LIB_DIR=""
+    for d in /lib/x86_64-linux-gnu/security /lib64/security /usr/lib64/security /lib/security /usr/lib/security; do
+      [ -f "$d/pam_unix.so" ] && PAM_LIB_DIR="$d" && break
+    done
+    if [ -n "$PAM_LIB_DIR" ]; then
+      deny_hash=$(sha256sum "$PAM_LIB_DIR/pam_deny.so" 2>/dev/null | awk '{print $1}')
+      permit_hash=$(sha256sum "$PAM_LIB_DIR/pam_permit.so" 2>/dev/null | awk '{print $1}')
+      if [ -n "$deny_hash" ] && [ "$deny_hash" = "$permit_hash" ]; then
+        echo "[CRITICAL] pam_deny.so and pam_permit.so have IDENTICAL hashes -- likely swapped!"
+      else
+        echo "pam_deny/pam_permit hashes differ (OK)"
+      fi
+    else
+      echo '(PAM lib dir not found)'
+    fi
+
+    echo '=== Recently modified PAM files (7 days) ==='
+    find /etc/pam.d -type f -mtime -7 2>/dev/null | \
+      while read -r f; do echo "[MODIFIED] $f"; done || echo '(none)'
+
+    echo '=== Recently modified PAM shared libs (7 days) ==='
+    for d in /lib/x86_64-linux-gnu/security /lib64/security /usr/lib64/security /lib/security /usr/lib/security; do
+      [ -d "$d" ] || continue
+      find "$d" -name 'pam_*.so' -mtime -7 2>/dev/null | \
+        while read -r f; do echo "[MODIFIED LIB] $f"; done
+    done || echo '(none)'
+  register: pam_audit
+  changed_when: false
+  failed_when: false
+  become: true
+
+- name: Collect suspicious ld.so.conf.d paths and recent library changes
+  ansible.builtin.shell: |
+    echo '=== Suspicious library paths in ld.so.conf.d ==='
+    for conf in /etc/ld.so.conf.d/*; do
+      [ -f "$conf" ] || continue
+      while IFS= read -r path; do
+        [ -z "$path" ] && continue
+        [[ "$path" == \#* ]] && continue
+        if [[ "$path" == /tmp/* ]] || [[ "$path" == /home/* ]] || \
+           [[ "$path" == /var/tmp/* ]] || [[ "$path" == /dev/shm/* ]]; then
+          echo "[SUSPICIOUS] $conf: $path"
+        fi
+      done < "$conf"
+    done || echo '(none)'
+
+    echo '=== Recently modified shared libraries (7 days) ==='
+    for libdir in /lib /lib64 /usr/lib /usr/lib64; do
+      [ -d "$libdir" ] || continue
+      find "$libdir" -name '*.so*' -mtime -7 2>/dev/null | head -20 | \
+        while read -r lib; do echo "[RECENT LIB] $lib"; done
+    done || echo '(none)'
+  register: lib_audit
+  changed_when: false
+  failed_when: false
+  become: true
+
+- name: Package binary integrity check
+  ansible.builtin.shell: |
+    echo '=== Package binary integrity ==='
+    if command -v dpkg &>/dev/null; then
+      dpkg --verify 2>/dev/null | \
+        grep -E '(sshd|ssh|apache|nginx|mysql|postfix|dovecot|named|vsftpd|proftpd|httpd)' || \
+        echo '(no modifications detected by dpkg)'
+    elif command -v rpm &>/dev/null; then
+      rpm -Va 2>/dev/null | \
+        grep -E '(sshd|httpd|nginx|mysql|mariadb|postfix|dovecot|named|vsftpd)' || \
+        echo '(no modifications detected by rpm)'
+    else
+      echo '(no package manager available)'
+    fi
+  register: pkg_integrity
+  changed_when: false
+  become: true
+  failed_when: false
+
+- name: Audit suspicious systemd units
+  ansible.builtin.shell: |
+    PATTERN='nc |ncat |netcat |bash -i|/bin/sh |/bin/bash |/tmp/|/dev/shm/|/var/tmp/|curl |wget |python.*-c|perl.*-e|ruby.*-e|mkfifo|socat|openssl.*s_client|xterm.*-display|0\.0\.0\.0'
+    echo '=== Suspicious unit files ==='
+    for dir in /etc/systemd/system /usr/lib/systemd/system /run/systemd/system /lib/systemd/system; do
+      [ -d "$dir" ] || continue
+      find "$dir" -name '*.service' -o -name '*.timer' -o -name '*.path' 2>/dev/null | while read -r f; do
+        if grep -qiE "$PATTERN" "$f" 2>/dev/null; then
+          echo ""
+          echo "[SUSPICIOUS] $f"
+          grep -n '' "$f"
+        fi
+      done
+    done
+
+    echo ''
+    echo '=== User systemd units ==='
+    find /home /root -path '*/.config/systemd/user/*.service' \
+                     -o -path '*/.config/systemd/user/*.timer' 2>/dev/null | while read -r f; do
+      echo "[USER UNIT] $f"
+      cat "$f"
+    done
+
+    echo ''
+    echo '=== Units with non-standard ExecStart paths ==='
+    for dir in /etc/systemd/system /usr/lib/systemd/system /run/systemd/system /lib/systemd/system; do
+      [ -d "$dir" ] || continue
+      grep -rn 'ExecStart=' "$dir" 2>/dev/null | \
+        grep -vE 'ExecStart=(/usr/s?bin/|/usr/lib/|/usr/libexec/|/bin/|/sbin/|/lib/|-$)' | \
+        grep -v '^Binary' || true
+    done
+  register: systemd_units_audit
+  changed_when: false
+  failed_when: false
+  become: true
+
+- name: Save full persistence scan to controller
+  ansible.builtin.copy:
+    content: |
+      ============================================================
+      HOST: {{ inventory_hostname }}
+      ============================================================
+
+      --- SUSPICIOUS CRON ENTRIES ---
+      {{ suspicious_crons.stdout | default('(none)') }}
+
+      --- SUSPICIOUS SHELL PROFILES ---
+      {{ suspicious_profiles.stdout | default('(none)') }}
+
+      --- OTHER PERSISTENCE LOCATIONS ---
+      {{ other_persistence.stdout | default('') }}
+
+      --- USER CRONTABS ---
+      {{ user_crontabs.stdout | default('(none)') }}
+
+      --- AT JOBS ---
+      {{ at_jobs.stdout | default('(none)') }}
+
+      --- SYSTEMD TIMERS ---
+      {{ systemd_timers.stdout | default('(none)') }}
+
+      --- SYSTEMD GENERATORS ---
+      {{ systemd_generators.stdout | default('(none)') }}
+
+      --- SUSPICIOUS SYSTEMD UNITS ---
+      {{ systemd_units_audit.stdout | default('(none)') }}
+
+      --- MOTD SCRIPTS ---
+      {{ motd_audit.stdout | default('(none)') }}
+
+      --- UDEV RULES ---
+      {{ udev_audit.stdout | default('(none)') }}
+
+      --- UNUSUAL AUTHORIZED_KEYS ---
+      {{ unusual_authkeys.stdout | default('(none)') }}
+
+      --- FILE CAPABILITIES ---
+      {{ file_caps.stdout | default('(none)') }}
+
+      --- EXECUTABLES IN TEMP DIRS ---
+      {{ temp_executables.stdout | default('(none)') }}
+
+      --- RECENTLY MODIFIED SYSTEM EXECUTABLES ---
+      {{ recent_executables.stdout | default('(none)') }}
+
+      --- PAM AUDIT ---
+      {{ pam_audit.stdout | default('(none)') }}
+
+      --- LIBRARY AUDIT ---
+      {{ lib_audit.stdout | default('(none)') }}
+
+      --- PACKAGE INTEGRITY ---
+      {{ pkg_integrity.stdout | default('(none)') }}
+    dest: "{{ linux_persistence_output_dir }}/{{ inventory_hostname }}/persistence_scan.txt"
+    mode: "0600"
+  delegate_to: localhost
+  become: false
+
+# ---------------------------------------------------------------------------
+# Phase 2: Surface findings then prompt for remediation
+# ---------------------------------------------------------------------------
+- name: Print suspicious systemd unit findings
+  ansible.builtin.debug:
+    msg: "{{ systemd_units_audit.stdout_lines }}"
+  when: "'SUSPICIOUS' in (systemd_units_audit.stdout | default('')) or 'USER UNIT' in (systemd_units_audit.stdout | default(''))"
+
+- name: Print suspicious cron findings
+  ansible.builtin.debug:
+    msg: "{{ suspicious_crons.stdout_lines }}"
+  when: suspicious_crons.stdout | length > 0
+
+- name: Print suspicious profile findings
+  ansible.builtin.debug:
+    msg: "{{ suspicious_profiles.stdout_lines }}"
+  when: suspicious_profiles.stdout | length > 0
+
+- name: Print PAM critical findings
+  ansible.builtin.debug:
+    msg: "{{ pam_audit.stdout_lines }}"
+  when: >
+    'pam_exec' in (pam_audit.stdout | default('')) or
+    'nullok' in (pam_audit.stdout | default('')) or
+    'CRITICAL' in (pam_audit.stdout | default('')) or
+    'MODIFIED' in (pam_audit.stdout | default(''))
+
+- name: Print temp directory executables
+  ansible.builtin.debug:
+    msg: "{{ temp_executables.stdout_lines }}"
+  when: "'EXEC IN' in (temp_executables.stdout | default('')) or 'HIDDEN' in (temp_executables.stdout | default(''))"
+
+- name: Print unusual authorized_keys
+  ansible.builtin.debug:
+    msg: "{{ unusual_authkeys.stdout_lines }}"
+  when: "'UNUSUAL' in (unusual_authkeys.stdout | default(''))"
+
+- name: Print dangerous file capabilities
+  ansible.builtin.debug:
+    msg: "{{ file_caps.stdout_lines }}"
+  when: "'DANGEROUS' in (file_caps.stdout | default('')) or 'UNUSUAL' in (file_caps.stdout | default(''))"
+
+- name: Print package integrity violations
+  ansible.builtin.debug:
+    msg: "{{ pkg_integrity.stdout_lines }}"
+  when: >
+    pkg_integrity.stdout | default('') | length > 0 and
+    'no modifications' not in (pkg_integrity.stdout | default('')) and
+    'not available' not in (pkg_integrity.stdout | default(''))
+
+- name: Prompt to comment out suspicious cron entries
+  ansible.builtin.pause:
+    prompt: |
+      [{{ inventory_hostname }}] Suspicious cron entries found above.
+      Comment them out now? (y/N)
+  register: cron_remove_prompt
+  when: suspicious_crons.stdout | length > 0
+  delegate_to: localhost
+  run_once: false
+
+- name: Comment out suspicious cron entries
+  ansible.builtin.shell: |
+    PATTERN='{{ linux_persistence_suspicious_pattern | regex_replace("\n", "") | regex_replace(" +", "") }}'
+    find /etc/crontab /etc/cron.d /etc/cron.hourly /etc/cron.daily \
+         /etc/cron.weekly /etc/cron.monthly \
+         /var/spool/cron /var/spool/cron/crontabs \
+         -maxdepth 2 -type f 2>/dev/null | while read f; do
+      sed -i -E "/$PATTERN/ { /^#/! s/^/# CCDC-REMOVED: / }" "$f"
+    done
+  become: true
+  when:
+    - suspicious_crons.stdout | length > 0
+    - cron_remove_prompt.user_input | default('n') | lower == 'y'
+
+- name: Prompt to comment out suspicious shell profile entries
+  ansible.builtin.pause:
+    prompt: |
+      [{{ inventory_hostname }}] Suspicious shell profile entries found above.
+      Comment them out now? (y/N)
+  register: profile_remove_prompt
+  when: suspicious_profiles.stdout | length > 0
+  delegate_to: localhost
+  run_once: false
+
+- name: Comment out suspicious shell profile entries
+  ansible.builtin.shell: |
+    PATTERN='{{ linux_persistence_suspicious_pattern | regex_replace("\n", "") | regex_replace(" +", "") }}'
+    find /home /root /etc/profile.d /etc/skel \
+         -maxdepth 3 \
+         \( -name '.bashrc' -o -name '.profile' -o -name '.bash_profile' \
+            -o -name '.zshrc' -o -name '.zprofile' -o -name '*.sh' \) \
+         2>/dev/null | while read f; do
+      sed -i -E "/$PATTERN/ { /^#/! s/^/# CCDC-REMOVED: / }" "$f"
+    done
+  become: true
+  when:
+    - suspicious_profiles.stdout | length > 0
+    - profile_remove_prompt.user_input | default('n') | lower == 'y'
+
+- name: Prompt to wipe /etc/ld.so.preload if present
+  ansible.builtin.pause:
+    prompt: |
+      [{{ inventory_hostname }}] /etc/ld.so.preload exists (shown above).
+      Truncate it now? (y/N)
+  register: ldpreload_prompt
+  when: "'/etc/ld.so.preload' not in other_persistence.stdout or '(not present)' not in other_persistence.stdout"
+  delegate_to: localhost
+  run_once: false
+
+- name: Truncate /etc/ld.so.preload
+  ansible.builtin.copy:
+    content: ""
+    dest: /etc/ld.so.preload
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  when:
+    - ldpreload_prompt.user_input is defined
+    - ldpreload_prompt.user_input | lower == 'y'

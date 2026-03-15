@@ -1,0 +1,132 @@
+---
+# =============================================================================
+# win_defender_harden — Lock down Windows Defender on all Windows hosts
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# 1. Enable real-time protection
+# ---------------------------------------------------------------------------
+- name: Defender — enable real-time monitoring
+  ansible.windows.win_shell: |
+    Set-MpPreference -DisableRealtimeMonitoring $false
+    Set-MpPreference -DisableBehaviorMonitoring $false
+    Set-MpPreference -DisableIOAVProtection $false
+    Set-MpPreference -DisableScriptScanning $false
+    Write-Output "RealTimeProtection enabled"
+  when: win_defender_enable_realtime
+
+# ---------------------------------------------------------------------------
+# 2. Clear all exclusions (red team adds C:\ or *.exe exclusions)
+# ---------------------------------------------------------------------------
+- name: Defender — remove all path exclusions
+  ansible.windows.win_shell: |
+    $excl = (Get-MpPreference).ExclusionPath
+    if ($excl) {
+      foreach ($p in $excl) {
+        Remove-MpPreference -ExclusionPath $p -ErrorAction SilentlyContinue
+      }
+      Write-Output "Removed $($excl.Count) path exclusions"
+    } else {
+      Write-Output "No path exclusions found"
+    }
+  when: win_defender_clear_exclusions
+
+- name: Defender — remove all extension exclusions
+  ansible.windows.win_shell: |
+    $excl = (Get-MpPreference).ExclusionExtension
+    if ($excl) {
+      foreach ($e in $excl) {
+        Remove-MpPreference -ExclusionExtension $e -ErrorAction SilentlyContinue
+      }
+      Write-Output "Removed $($excl.Count) extension exclusions"
+    } else {
+      Write-Output "No extension exclusions found"
+    }
+  when: win_defender_clear_exclusions
+
+- name: Defender — remove all process exclusions
+  ansible.windows.win_shell: |
+    $excl = (Get-MpPreference).ExclusionProcess
+    if ($excl) {
+      foreach ($p in $excl) {
+        Remove-MpPreference -ExclusionProcess $p -ErrorAction SilentlyContinue
+      }
+      Write-Output "Removed $($excl.Count) process exclusions"
+    } else {
+      Write-Output "No process exclusions found"
+    }
+  when: win_defender_clear_exclusions
+
+# ---------------------------------------------------------------------------
+# 3. Enable PUA detection
+# ---------------------------------------------------------------------------
+- name: Defender — enable PUA (Potentially Unwanted Application) detection
+  ansible.windows.win_shell: |
+    Set-MpPreference -PUAProtection 1
+    Write-Output "PUA protection enabled"
+  when: win_defender_enable_pua
+
+# ---------------------------------------------------------------------------
+# 4. Cloud-delivered protection
+# ---------------------------------------------------------------------------
+- name: Defender — enable cloud-delivered protection
+  ansible.windows.win_shell: |
+    Set-MpPreference -MAPSReporting Advanced
+    Set-MpPreference -SubmitSamplesConsent SendAllSamples
+    Write-Output "Cloud protection enabled"
+  when: win_defender_cloud_protection
+
+# ---------------------------------------------------------------------------
+# 5. Tamper protection
+# NOTE: TamperProtection registry key is protected by the Defender service
+# and cannot be written even by SYSTEM via win_regedit. It must be enabled
+# via Windows Security Center UI or MDM/Intune. Skipped here.
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# 6. Attack Surface Reduction (ASR) rules
+# ---------------------------------------------------------------------------
+- name: Defender — enable ASR rules
+  ansible.windows.win_shell: |
+    $rules = @(
+      {% for guid in win_defender_asr_rules %}"{{ guid }}"{% if not loop.last %},{% endif %}
+      {% endfor %}
+    )
+    $mode = {{ win_defender_asr_mode }}
+    $actions = @($mode) * $rules.Count
+    Add-MpPreference -AttackSurfaceReductionRules_Ids $rules -AttackSurfaceReductionRules_Actions $actions
+    Write-Output "Enabled $($rules.Count) ASR rules in mode $mode"
+  when: win_defender_enable_asr
+
+# ---------------------------------------------------------------------------
+# 7. Force signature update
+# ---------------------------------------------------------------------------
+- name: Defender — update malware signatures
+  ansible.windows.win_shell: |
+    Update-MpSignature -ErrorAction SilentlyContinue
+    $sig = (Get-MpComputerStatus).AntivirusSignatureLastUpdated
+    Write-Output "Signatures updated. Last update: $sig"
+  when: win_defender_update_signatures
+  failed_when: false  # may fail if no internet access
+
+# ---------------------------------------------------------------------------
+# 8. Report current Defender status
+# ---------------------------------------------------------------------------
+- name: Defender — report current status
+  ansible.windows.win_shell: |
+    $s = Get-MpComputerStatus
+    Write-Output "RealTimeProtection: $($s.RealTimeProtectionEnabled)"
+    Write-Output "BehaviorMonitor: $($s.BehaviorMonitorEnabled)"
+    Write-Output "IoavProtection: $($s.IoavProtectionEnabled)"
+    Write-Output "AntivirusEnabled: $($s.AntivirusEnabled)"
+    Write-Output "TamperProtection: $($s.IsTamperProtected)"
+    Write-Output "SignatureAge: $($s.AntivirusSignatureAge) days"
+    $excl = (Get-MpPreference).ExclusionPath
+    if ($excl) { Write-Output "WARNING: $($excl.Count) path exclusions remain" }
+    else { Write-Output "No exclusions configured" }
+  register: _defender_status
+  changed_when: false
+
+- name: Defender — display status
+  ansible.builtin.debug:
+    msg: "{{ _defender_status.stdout_lines }}"

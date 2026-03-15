@@ -1,0 +1,6 @@
+---
+- name: Kill SSH tunnel process on port 8443
+  ansible.builtin.shell: |
+    pid=$(ss -tlnp | awk -F'pid=' '/8443/{print $2}' | awk -F',' '{print $1}')
+    [ -n "$pid" ] && kill "$pid" || true
+  changed_when: false

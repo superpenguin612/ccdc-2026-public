@@ -1,0 +1,183 @@
+---
+# Account Logon - catch pass-the-hash, brute force, ticket abuse
+- name: Audit Credential Validation
+  ansible.windows.win_audit_policy_system:
+    subcategory: Credential Validation
+    audit_type: success, failure
+
+- name: Audit Kerberos Authentication Service
+  ansible.windows.win_audit_policy_system:
+    subcategory: Kerberos Authentication Service
+    audit_type: success, failure
+
+- name: Audit Kerberos Service Ticket Operations
+  ansible.windows.win_audit_policy_system:
+    subcategory: Kerberos Service Ticket Operations
+    audit_type: success, failure
+
+# Account Management - catch account creation/privilege escalation
+- name: Audit Computer Account Management
+  ansible.windows.win_audit_policy_system:
+    subcategory: Computer Account Management
+    audit_type: success, failure
+
+- name: Audit Security Group Management
+  ansible.windows.win_audit_policy_system:
+    subcategory: Security Group Management
+    audit_type: success, failure
+
+- name: Audit User Account Management
+  ansible.windows.win_audit_policy_system:
+    subcategory: User Account Management
+    audit_type: success, failure
+
+# Detailed Tracking - catch malicious process execution
+- name: Audit DPAPI Activity
+  ansible.windows.win_audit_policy_system:
+    subcategory: DPAPI Activity
+    audit_type: success, failure
+
+- name: Audit Process Creation
+  ansible.windows.win_audit_policy_system:
+    subcategory: Process Creation
+    audit_type: success, failure
+
+# DS Access - catch AD enumeration and modification (DC only, harmless elsewhere)
+- name: Audit Directory Service Access
+  ansible.windows.win_audit_policy_system:
+    subcategory: Directory Service Access
+    audit_type: failure
+
+- name: Audit Directory Service Changes
+  ansible.windows.win_audit_policy_system:
+    subcategory: Directory Service Changes
+    audit_type: success, failure
+
+# Logon/Logoff - catch lateral movement, pass-the-hash, persistence
+- name: Audit Account Lockout
+  ansible.windows.win_audit_policy_system:
+    subcategory: Account Lockout
+    audit_type: success, failure
+
+- name: Audit Group Membership
+  ansible.windows.win_audit_policy_system:
+    subcategory: Group Membership
+    audit_type: success, failure
+
+- name: Audit Logon
+  ansible.windows.win_audit_policy_system:
+    subcategory: Logon
+    audit_type: success, failure
+
+- name: Audit Logoff
+  ansible.windows.win_audit_policy_system:
+    subcategory: Logoff
+    audit_type: success
+
+- name: Audit Other Logon/Logoff Events
+  ansible.windows.win_audit_policy_system:
+    subcategory: Other Logon/Logoff Events
+    audit_type: success, failure
+
+- name: Audit Special Logon
+  ansible.windows.win_audit_policy_system:
+    subcategory: Special Logon
+    audit_type: success, failure
+
+# Object Access - catch SMB lateral movement and credential access
+- name: Audit File Share
+  ansible.windows.win_audit_policy_system:
+    subcategory: File Share
+    audit_type: success, failure
+
+- name: Audit Removable Storage
+  ansible.windows.win_audit_policy_system:
+    subcategory: Removable Storage
+    audit_type: success, failure
+
+- name: Audit SAM
+  ansible.windows.win_audit_policy_system:
+    subcategory: SAM
+    audit_type: failure
+
+- name: Audit Filtering Platform Connection
+  ansible.windows.win_audit_policy_system:
+    subcategory: Filtering Platform Connection
+    audit_type: failure
+
+# Policy Change - catch attacker covering tracks or weakening defenses
+- name: Audit Audit Policy Change
+  ansible.windows.win_audit_policy_system:
+    subcategory: Audit Policy Change
+    audit_type: success, failure
+
+- name: Audit Authentication Policy Change
+  ansible.windows.win_audit_policy_system:
+    subcategory: Authentication Policy Change
+    audit_type: success, failure
+
+- name: Audit Authorization Policy Change
+  ansible.windows.win_audit_policy_system:
+    subcategory: Authorization Policy Change
+    audit_type: success, failure
+
+- name: Audit MPSSVC Rule-Level Policy Change
+  ansible.windows.win_audit_policy_system:
+    subcategory: MPSSVC Rule-Level Policy Change
+    audit_type: success, failure
+
+# Privilege Use - catch token impersonation, SeDebugPrivilege abuse
+- name: Audit Sensitive Privilege Use
+  ansible.windows.win_audit_policy_system:
+    subcategory: Sensitive Privilege Use
+    audit_type: success, failure
+
+# System - catch service installs, driver loads, integrity failures
+- name: Audit Security State Change
+  ansible.windows.win_audit_policy_system:
+    subcategory: Security State Change
+    audit_type: success, failure
+
+- name: Audit Security System Extension
+  ansible.windows.win_audit_policy_system:
+    subcategory: Security System Extension
+    audit_type: success, failure
+
+- name: Audit System Integrity
+  ansible.windows.win_audit_policy_system:
+    subcategory: System Integrity
+    audit_type: success, failure
+
+# Expand Event Log sizes to handle increased logging volume
+- name: Set Security Log Max Size (512MB)
+  win_regedit:
+    path: HKLM:\SYSTEM\CurrentControlSet\Services\EventLog\Security
+    name: MaxSize
+    data: 536870912
+    type: dword
+    state: present
+
+- name: Set System Log Max Size (256MB)
+  win_regedit:
+    path: HKLM:\SYSTEM\CurrentControlSet\Services\EventLog\System
+    name: MaxSize
+    data: 268435456
+    type: dword
+    state: present
+
+- name: Set Application Log Max Size (256MB)
+  win_regedit:
+    path: HKLM:\SYSTEM\CurrentControlSet\Services\EventLog\Application
+    name: MaxSize
+    data: 268435456
+    type: dword
+    state: present
+
+# Enable command line logging in process creation events
+- name: Enable Command Line Logging in Process Creation
+  win_regedit:
+    path: HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\Audit
+    name: ProcessCreationIncludeCmdLine_Enabled
+    data: 1
+    type: dword
+    state: present

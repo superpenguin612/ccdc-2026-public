@@ -1,0 +1,5 @@
+---
+- include_tasks: external.yml
+- include_tasks: internal.yml
+- include_tasks: net_blocks.yml
+- include_tasks: remote_net.yml

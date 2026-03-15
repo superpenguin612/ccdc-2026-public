@@ -1,0 +1,24 @@
+---
+- name: Check if Wazuh Already Forwards Defender Logs
+  ansible.windows.win_shell: |
+    if (Get-Content 'C:\Program Files (x86)\ossec-agent\ossec.conf' -ErrorAction SilentlyContinue | Select-String '<location>Microsoft-Windows-Windows Defender/Operational</location>' -Quiet) {
+      Write-Output 'found'
+    } else {
+      Write-Output ''
+    }
+  changed_when: false
+  register: defender_wazuh_config
+
+- name: Ensure Wazuh Forwards Defender Logs
+  randrej.windows.win_blockinfile:
+    path: 'C:\Program Files (x86)\ossec-agent\ossec.conf'
+    insertbefore: "</ossec_config>"
+    block: |
+      <localfile>
+        <location>Microsoft-Windows-Windows Defender/Operational</location>
+        <log_format>eventchannel</log_format>
+      </localfile>
+    marker: "<!-- CCDC Wazuh Defender {mark} -->"
+    state: present
+  when: defender_wazuh_config.stdout == ''
+  notify: Restart Wazuh Agent

@@ -1,0 +1,14 @@
+---
+# Rotate the Splunk admin password
+splunk_harden_rotate_password: true
+
+# Splunk admin username
+splunk_harden_admin_user: admin
+
+# Default Splunk admin password (plaintext, set in vault in production)
+# splunk_harden_admin_password: "{{ vault_splunk_password }}"
+splunk_harden_admin_password: ""
+
+# Current/default password to auth with before rotating
+# Try both the default and the already-rotated password
+splunk_harden_current_password: "changeme"

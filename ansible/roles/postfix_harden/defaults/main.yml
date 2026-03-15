@@ -1,0 +1,3 @@
+---
+# Postfix service name
+postfix_harden_service: postfix

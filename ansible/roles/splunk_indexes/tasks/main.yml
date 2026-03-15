@@ -1,0 +1,55 @@
+---
+# =============================================================================
+# splunk_indexes — Create required indexes on the Splunk server
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# 1. Check which indexes already exist
+# ---------------------------------------------------------------------------
+- name: Indexes — list existing indexes
+  ansible.builtin.command: >
+    {{ splunk_indexes_home }}/bin/splunk list index
+    -auth '{{ splunk_indexes_admin_user }}:{{ splunk_indexes_admin_pass }}'
+  register: _splunk_existing_indexes
+  changed_when: false
+  become: true
+  become_user: splunk
+  no_log: true
+
+# ---------------------------------------------------------------------------
+# 2. Create missing indexes
+# ---------------------------------------------------------------------------
+- name: Indexes — create index {{ item }}
+  ansible.builtin.command: >
+    {{ splunk_indexes_home }}/bin/splunk add index {{ item }}
+    -maxTotalDataSizeMB {{ splunk_indexes_max_size_mb }}
+    -frozenTimePeriodInSecs {{ splunk_indexes_frozen_secs }}
+    -auth '{{ splunk_indexes_admin_user }}:{{ splunk_indexes_admin_pass }}'
+  loop: "{{ splunk_indexes_list }}"
+  when: "item not in _splunk_existing_indexes.stdout"
+  become: true
+  become_user: splunk
+  no_log: true
+  register: _splunk_index_create
+  failed_when:
+    - _splunk_index_create.rc != 0
+    - "'already exists' not in (_splunk_index_create.stderr | default(''))"
+  notify: Restart splunk
+
+# ---------------------------------------------------------------------------
+# 3. Report created indexes
+# ---------------------------------------------------------------------------
+- name: Indexes — verify all indexes exist
+  ansible.builtin.command: >
+    {{ splunk_indexes_home }}/bin/splunk list index
+    -auth '{{ splunk_indexes_admin_user }}:{{ splunk_indexes_admin_pass }}'
+  register: _splunk_final_indexes
+  changed_when: false
+  become: true
+  become_user: splunk
+  no_log: true
+
+- name: Indexes — display configured indexes
+  ansible.builtin.debug:
+    msg: >
+      Indexes present: {{ splunk_indexes_list | select('in', _splunk_final_indexes.stdout) | list | join(', ') }}

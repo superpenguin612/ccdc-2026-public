@@ -1,0 +1,19 @@
+---
+# Name of the FTP site to harden (as shown in IIS Manager)
+iis_ftp_site_name: "FTP-CCDC"
+
+# Stop and disable the Default Web Site (not needed on a pure FTP server)
+iis_ftp_stop_default_website: true
+
+# Disable Anonymous FTP Authentication
+iis_ftp_disable_anonymous_auth: true
+
+# Remove Anonymous FTP Authorization rules (allows anonymous read/write)
+iis_ftp_remove_anonymous_authz: true
+
+# Disable SMB sharing on the FTP root
+# Sets the FTP site's SMB sharing access to None
+iis_ftp_disable_smb_share: true
+
+# Name of the SMB share to remove (if it exists) — blank = skip
+iis_ftp_smb_share_name: ""

@@ -1,0 +1,14 @@
+---
+# Port sshesame listens on (honeypot port, real SSH is on linux_firewall_ssh_port)
+sshesame_port: 22
+
+# Where to install the binary
+sshesame_install_path: /usr/local/bin/sshesame
+
+# Config and data dirs
+sshesame_config_path: /etc/sshesame/sshesame.yaml
+sshesame_data_dir: /var/lib/sshesame
+
+# Log file path (for Wazuh/Splunk to monitor)
+sshesame_log_path: /var/log/sshesame.log
+

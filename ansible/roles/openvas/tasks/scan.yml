@@ -1,0 +1,39 @@
+---
+# ---------------------------------------------------------------------------
+# Start scans and (optionally) wait for completion + fetch reports
+# ---------------------------------------------------------------------------
+
+- name: OpenVAS — start scan tasks (background — monitor in web UI)
+  ansible.builtin.command:
+    cmd: python3 /tmp/start_scans.py
+  become: true
+  async: 7200    # 2 hours max — full authenticated scan takes ~30-90 min
+  poll: 0        # fire-and-forget; don't block Ansible
+  register: _gvm_scan_job
+
+- name: OpenVAS — print scan status and access instructions
+  ansible.builtin.debug:
+    msg:
+      - "Scans started in background (job ID: {{ _gvm_scan_job.ansible_job_id }})."
+      - ""
+      - "Monitor progress in the GVM web UI:"
+      - "  URL      : https://{{ ansible_host }}:9392"
+      - "  Username : admin"
+      - "  Password : <openvas_admin_password from vault>"
+      - ""
+      - "Reports will be exported to /tmp/openvas_reports/ on this host"
+      - "and fetched to: {{ openvas_report_dir }}/"
+      - ""
+      - "To check background job status:"
+      - "  ansible ubuntu-wkst -m async_status -a 'jid={{ _gvm_scan_job.ansible_job_id }}'"
+
+- name: OpenVAS — fetch any completed reports back to controller
+  ansible.builtin.fetch:
+    src: "{{ item }}"
+    dest: "{{ openvas_report_dir }}/"
+    flat: false
+    fail_on_missing: false
+  with_fileglob:
+    - /tmp/openvas_reports/*.xml
+    - /tmp/openvas_reports/*.pdf
+    - /tmp/openvas_reports/*.html

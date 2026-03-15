@@ -1,0 +1,7 @@
+---
+- name: Create non default SSH
+  paloaltonetworks.panos.panos_service_object:
+    provider: "{{ panos_provider }}"
+    name: "{{ app_type_mappings.fw_ssh.palo_service[0] }}"
+    protocol: "tcp"
+    destination_port: "{{ app_type_mappings.fw_ssh.ports[0] }}"

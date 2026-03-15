@@ -1,0 +1,18 @@
+---
+# Update virus definitions after install
+clamav_update_signatures: true
+
+# Enable on-access scanning daemon (clamonacc)
+clamav_enable_onacc: false
+
+# Run an initial full scan after install
+clamav_initial_scan: false
+clamav_scan_dirs:
+  - /tmp
+  - /var/tmp
+  - /dev/shm
+  - /home
+  - /var/www
+
+# Quarantine directory
+clamav_quarantine_dir: /root/clamav_quarantine

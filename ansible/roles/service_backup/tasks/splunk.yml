@@ -1,0 +1,30 @@
+---
+# Back up Splunk etc/ (config) — indexes are too large for CCDC.
+# The splunk binary itself is reinstalled from the .deb on restore.
+- name: Splunk — ensure backup directory exists on host
+  ansible.builtin.file:
+    path: "{{ linux_backup_root }}/splunk"
+    state: directory
+    mode: "0700"
+    owner: root
+    group: root
+  become: true
+
+- name: Splunk — archive etc/ (config)
+  ansible.builtin.command: >
+    tar -czf {{ linux_backup_root }}/splunk/splunk_etc.tar.gz
+    -C {{ svc_splunk_home }} etc
+  become: true
+
+- name: Splunk — record splunk package name/version
+  ansible.builtin.shell: |
+    rpm -qa splunk 2>/dev/null || dpkg -l splunk 2>/dev/null | awk '/^ii/{print $2, $3}' || true
+  become: true
+  register: splunk_pkg_info
+
+- name: Splunk — save package info to file
+  ansible.builtin.copy:
+    content: "{{ splunk_pkg_info.stdout }}"
+    dest: "{{ linux_backup_root }}/splunk/splunk_pkg.txt"
+    mode: "0600"
+  become: true

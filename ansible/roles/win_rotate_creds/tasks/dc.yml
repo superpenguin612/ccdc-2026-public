@@ -1,0 +1,22 @@
+---
+# Tasks for domain controller hosts
+
+- name: Create new Domain Admin account
+  ansible.windows.win_powershell:
+    script: |
+      $pw = ConvertTo-SecureString "{{ vault_new_credentials[inventory_hostname].password }}" -AsPlainText -Force
+      New-ADUser `
+        -Name "{{ vault_new_credentials[inventory_hostname].user }}" `
+        -SamAccountName "{{ vault_new_credentials[inventory_hostname].user }}" `
+        -AccountPassword $pw `
+        -Enabled $true `
+        -PasswordNeverExpires $true `
+        -ChangePasswordAtLogon $false
+      Add-ADGroupMember -Identity "Domain Admins" -Members "{{ vault_new_credentials[inventory_hostname].user }}"
+      Add-ADGroupMember -Identity "Administrators" -Members "{{ vault_new_credentials[inventory_hostname].user }}"
+  no_log: true
+
+- name: Disable old DC domain account
+  ansible.windows.win_powershell:
+    script: |
+      Disable-ADAccount -Identity "{{ host_defaults[inventory_hostname].user }}"

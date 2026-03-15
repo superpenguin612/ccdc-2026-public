@@ -1,0 +1,17 @@
+---
+# ClamAV Windows MSI — downloaded from clamav.net
+clamav_msi_url: "https://www.clamav.net/downloads/production/clamav-1.4.4.win.x64.msi"
+clamav_msi_name: "clamav-1.4.4.win.x64.msi"
+clamav_install_dir: "C:\\Program Files\\ClamAV"
+
+# Update virus definitions after install
+clamav_update_signatures: true
+
+# Run an initial scan after install
+clamav_initial_scan: false
+clamav_scan_dirs:
+  - "C:\\Windows\\Temp"
+  - "C:\\Users"
+
+# Quarantine directory
+clamav_quarantine_dir: "C:\\ClamAV_Quarantine"

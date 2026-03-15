@@ -1,0 +1,95 @@
+---
+# ---------------------------------------------------------------------------
+# Run linpeas on remote Linux hosts and pull output back to the controller.
+# Place linpeas.sh in ansible/roles/linux_linpeas/files/linpeas.sh
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# 1. Upload linpeas to the remote host
+# ---------------------------------------------------------------------------
+- name: Upload executable
+  ansible.builtin.copy:
+    src: linpeas_linux_amd64
+    dest: "{{ linux_linpeas_remote_path }}"
+    owner: root
+    group: root
+    mode: "0700"
+  become: true
+
+# ---------------------------------------------------------------------------
+# 2. Run linpeas (capture full output including ANSI color codes)
+# ---------------------------------------------------------------------------
+- name: Run (this takes 1-3 minutes)
+  ansible.builtin.shell: |
+    {{ linux_linpeas_remote_path }} {{ linux_linpeas_flags }} 2>&1
+  become: true
+  register: _linpeas_output
+  changed_when: false
+  # linpeas can take a few minutes; don't time out too early
+  async: 300
+  poll: 10
+  no_log: true  # suppress from Ansible output — we save to file instead
+
+# ---------------------------------------------------------------------------
+# 3. Save raw output (with ANSI) to remote temp file
+# ---------------------------------------------------------------------------
+- name: Write raw output to remote temp file
+  ansible.builtin.copy:
+    content: "{{ _linpeas_output.stdout }}"
+    dest: "{{ linux_linpeas_remote_path }}.out"
+    owner: root
+    group: root
+    mode: "0600"
+  become: true
+
+# ---------------------------------------------------------------------------
+# 4. Pull output back to controller
+# ---------------------------------------------------------------------------
+- name: Ensure artifact directory exists on controller
+  ansible.builtin.file:
+    path: "{{ linux_linpeas_artifact_root }}/linpeas"
+    state: directory
+    mode: "0750"
+  delegate_to: localhost
+  become: false
+
+- name: Fetch output to controller
+  ansible.builtin.fetch:
+    src: "{{ linux_linpeas_remote_path }}.out"
+    dest: "{{ linux_linpeas_artifact_root }}/linpeas/{{ inventory_hostname }}_linpeas.txt"
+    flat: true
+  become: true
+
+# ---------------------------------------------------------------------------
+# 5. Strip ANSI codes to produce a clean readable copy
+# ---------------------------------------------------------------------------
+- name: Strip ANSI codes on controller
+  ansible.builtin.shell: |
+    sed 's/\x1b\[[0-9;]*m//g; s/\x1b\[[0-9;]*[A-Za-z]//g' \
+      "{{ linux_linpeas_artifact_root }}/linpeas/{{ inventory_hostname }}_linpeas.txt" \
+      > "{{ linux_linpeas_artifact_root }}/linpeas/{{ inventory_hostname }}_linpeas_clean.txt"
+  delegate_to: localhost
+  become: false
+  changed_when: false
+
+# ---------------------------------------------------------------------------
+# 6. Clean up remote files
+# ---------------------------------------------------------------------------
+- name: Remove script and output from remote host
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "{{ linux_linpeas_remote_path }}"
+    - "{{ linux_linpeas_remote_path }}.out"
+  become: true
+  when: linux_linpeas_cleanup
+
+# ---------------------------------------------------------------------------
+# 7. Print location of saved reports
+# ---------------------------------------------------------------------------
+- name: Report saved to controller
+  ansible.builtin.debug:
+    msg:
+      - "Raw (ANSI):  {{ linux_linpeas_artifact_root }}/linpeas/{{ inventory_hostname }}_linpeas.txt"
+      - "Clean text:  {{ linux_linpeas_artifact_root }}/linpeas/{{ inventory_hostname }}_linpeas_clean.txt"

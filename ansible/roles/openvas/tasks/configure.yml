@@ -1,0 +1,63 @@
+---
+# ---------------------------------------------------------------------------
+# Write Ansible variables to a JSON config file for the Python scripts,
+# then run the configuration script via gvm-script
+# ---------------------------------------------------------------------------
+
+- name: OpenVAS — ensure reports directory exists on controller
+  ansible.builtin.file:
+    path: "{{ openvas_report_dir }}"
+    state: directory
+    mode: "0750"
+  delegate_to: localhost
+
+- name: OpenVAS — write GVM configuration JSON for Python scripts
+  ansible.builtin.copy:
+    content: "{{ _gvm_config | to_json }}"
+    dest: /tmp/gvm_config.json
+    mode: "0600"
+  vars:
+    _gvm_config:
+      admin_password:   "{{ openvas_admin_password }}"
+      ssh_login:        "{{ openvas_ssh_login }}"
+      ssh_private_key:  "{{ vault_ssh_private_key }}"
+      ssh_cred_name:    "{{ openvas_ssh_credential_name }}"
+      smb_login:        "{{ openvas_smb_login }}"
+      smb_password:     "{{ openvas_smb_password }}"
+      smb_cred_name:    "{{ openvas_smb_credential_name }}"
+      linux_hosts:      "{{ openvas_linux_hosts }}"
+      windows_hosts:    "{{ openvas_windows_hosts }}"
+      scan_config:      "{{ openvas_scan_config }}"
+      port_list:        "{{ openvas_port_list }}"
+      alive_test:       "{{ openvas_alive_test }}"
+      max_hosts:        "{{ openvas_max_hosts }}"
+      max_checks:       "{{ openvas_max_checks }}"
+      report_format:    "{{ openvas_report_format }}"
+      report_dir:       "/tmp/openvas_reports"
+  no_log: true
+  become: true
+
+- name: OpenVAS — copy configuration script to host
+  ansible.builtin.copy:
+    src: configure_gvm.py
+    dest: /tmp/configure_gvm.py
+    mode: "0750"
+  become: true
+
+- name: OpenVAS — copy scan start/monitor script to host
+  ansible.builtin.copy:
+    src: start_scans.py
+    dest: /tmp/start_scans.py
+    mode: "0750"
+  become: true
+
+- name: OpenVAS — run GVM configuration (create creds, targets, tasks)
+  ansible.builtin.command:
+    cmd: python3 /tmp/configure_gvm.py
+  become: true
+  register: _gvm_configure
+  changed_when: "'Created' in _gvm_configure.stdout"
+
+- name: OpenVAS — show configuration output
+  ansible.builtin.debug:
+    var: _gvm_configure.stdout_lines

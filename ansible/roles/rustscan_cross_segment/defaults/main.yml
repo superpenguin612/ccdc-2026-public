@@ -1,0 +1,28 @@
+---
+# Group to scan from this scanner host (e.g. windows or linux)
+rustscan_target_group: ""
+
+# Optional explicit target IP list. If set, this is used instead of inventory group expansion.
+rustscan_target_ips: []
+
+# Scanner tuning
+rustscan_port_range: "1-65535"
+rustscan_ulimit: 5000
+rustscan_timeout: 2000
+
+# Final nmap args passed after '--'
+rustscan_nmap_args: "-Pn -n"
+
+# Linux install path (bundled ELF from files/)
+rustscan_linux_install_dir: '/tmp'
+rustscan_linux_exe: '/tmp/rustscan'
+rustscan_linux_source_exe: 'rustscan'
+
+# Windows install path (bundled exe from files/)
+rustscan_windows_install_dir: 'C:\\Tools\\rustscan'
+rustscan_windows_exe: '{{ rustscan_windows_install_dir }}\\rustscan.exe'
+rustscan_windows_source_exe: 'rustscan.exe'
+
+# Artifact locations on controller
+rustscan_artifact_root: "{{ artifact_root | default(lookup('env', 'HOME') ~ '/ccdc26/artifacts') }}"
+rustscan_artifact_dir: "{{ rustscan_artifact_root }}/rustscan_cross_segment/{{ inventory_hostname }}"

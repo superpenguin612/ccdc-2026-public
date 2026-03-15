@@ -1,0 +1,87 @@
+---
+# ---------------------------------------------------------------------------
+# 1. Socket pool — randomize source ports on outgoing queries
+#    Mitigates DNS spoofing / Kaminsky-style cache poisoning attacks
+# ---------------------------------------------------------------------------
+- name: DNS — set socket pool size (source port randomization)
+  ansible.windows.win_shell: |
+    $current = (Get-DnsServerSetting -All).SocketPoolSize
+    if ($current -ne {{ dns_harden_socket_pool_size }}) {
+        Set-DnsServerSetting -SocketPoolSize {{ dns_harden_socket_pool_size }}
+        Write-Output "changed"
+    } else {
+        Write-Output "noop"
+    }
+  register: _dns_socket_pool
+  changed_when: "'changed' in _dns_socket_pool.stdout"
+
+# ---------------------------------------------------------------------------
+# 2. Cache locking — prevent cache entries from being overwritten before TTL
+# ---------------------------------------------------------------------------
+- name: DNS — set cache locking to 100%
+  ansible.windows.win_shell: |
+    $current = (Get-DnsServerCache).LockingPercent
+    if ($current -ne {{ dns_harden_cache_lock_percent }}) {
+        Set-DnsServerCache -LockingPercent {{ dns_harden_cache_lock_percent }}
+        Write-Output "changed"
+    } else {
+        Write-Output "noop"
+    }
+  register: _dns_cache_lock
+  changed_when: "'changed' in _dns_cache_lock.stdout"
+  when: dns_harden_cache_locking
+
+# ---------------------------------------------------------------------------
+# 3. Disable zone transfers on all primary zones
+#    AD-integrated zones replicate via AD, not AXFR — this is safe to disable
+# ---------------------------------------------------------------------------
+- name: DNS — disable AXFR zone transfers on all primary zones
+  ansible.windows.win_shell: |
+    $changed = @()
+    Get-DnsServerZone | Where-Object {
+        $_.ZoneType -eq 'Primary' -and
+        $_.SecureSecondaries -ne 'NoTransfer' -and
+        -not $_.IsAutoCreated
+    } | ForEach-Object {
+        Set-DnsServerPrimaryZone -Name $_.ZoneName -SecureSecondaries NoTransfer -SecondaryServers @()
+        $changed += $_.ZoneName
+    }
+    if ($changed.Count -gt 0) {
+        Write-Output "changed: $($changed -join ', ')"
+    } else {
+        Write-Output "noop"
+    }
+  register: _dns_zone_xfer
+  changed_when: "'changed:' in _dns_zone_xfer.stdout"
+  when: dns_harden_disable_zone_transfers
+
+# ---------------------------------------------------------------------------
+# 4. CVE mitigation — restrict DNS TCP receive packet size
+# ---------------------------------------------------------------------------
+- name: DNS — apply TcpReceivePacketSize CVE fix
+  ansible.windows.win_regedit:
+    path: HKLM:\SYSTEM\CurrentControlSet\Services\DNS\Parameters
+    name: TcpReceivePacketSize
+    data: 0xFF00
+    type: dword
+    state: present
+  when: dns_harden_cve_tcp_packet_size
+  notify: Restart DNS
+
+# ---------------------------------------------------------------------------
+# 5. Enable DNS Server Audit event log channel
+#    Records zone changes, dynamic updates — important for incident reporting
+# ---------------------------------------------------------------------------
+- name: DNS — enable DNS Server Audit event log channel
+  ansible.windows.win_shell: |
+    $log = "Microsoft-Windows-DNSServer/Audit"
+    $enabled = (wevtutil gl $log 2>$null | Select-String "enabled:") -replace ".*enabled:\s*", ""
+    if ($enabled.Trim() -ne "true") {
+        wevtutil sl $log /e:true
+        Write-Output "changed"
+    } else {
+        Write-Output "noop"
+    }
+  register: _dns_audit_log
+  changed_when: "'changed' in _dns_audit_log.stdout"
+  when: dns_harden_enable_audit_log

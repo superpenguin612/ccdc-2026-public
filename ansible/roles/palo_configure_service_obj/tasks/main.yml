@@ -1,0 +1,11 @@
+---
+- include_tasks: http_svc.yml
+- include_tasks: https_svc.yml
+- include_tasks: ssh_svc.yml
+- include_tasks: splunk_web_svc.yml
+- include_tasks: splunk_forward_svc.yml
+- include_tasks: smtps_svc.yml
+- include_tasks: pop3s_svc.yml
+- include_tasks: imaps_svc.yml
+- include_tasks: wazuh_forward_svc.yml
+

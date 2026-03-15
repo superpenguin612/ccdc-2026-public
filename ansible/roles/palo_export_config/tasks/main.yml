@@ -1,0 +1,13 @@
+---
+- name: Ensure export directory exists
+  ansible.builtin.file:
+    path: "{{ artifact_root }}/palo_export_config"
+    state: directory
+    mode: "0750"
+  delegate_to: localhost
+
+- name: Export running configuration
+  paloaltonetworks.panos.panos_export:
+    provider: "{{ panos_provider }}"
+    category: "configuration"
+    filename: "{{ artifact_root }}/palo_export_config/{{ inventory_hostname }}_config.xml.bk"

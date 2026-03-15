@@ -1,0 +1,14 @@
+---
+# Run after 001-setup-windows-ssh.yml (requires SSH to be up)
+# Applies OS hardening and host-based firewall rules to all Windows hosts.
+#
+# Usage:
+#   ansible-playbook playbooks/windows/002-hardening-windows.yml
+
+- name: Harden Windows hosts
+  hosts: windows
+  gather_facts: false
+  roles:
+    - win_hardening
+    - win_no_screenlock
+

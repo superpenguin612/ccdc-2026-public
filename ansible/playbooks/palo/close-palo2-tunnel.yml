@@ -1,0 +1,8 @@
+---
+- name: Close palo-alto2 SSH tunnel
+  hosts: ubuntu-wkst
+  tasks:
+    - name: Close tunnel
+      ansible.builtin.include_role:
+        name: palo2_ssh_tunnel
+        tasks_from: close

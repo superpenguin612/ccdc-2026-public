@@ -1,0 +1,12 @@
+---
+- name: Allow Outbound DNS
+  paloaltonetworks.panos.panos_security_rule:
+    provider: "{{ panos_provider }}"
+    rule_name: "Outbound_DNS"
+    source_zone: ["internal"]
+    source_ip: ["Internal_Net"]
+    destination_zone: ["external"]
+    destination_ip: ["any"]
+    application: "{{ app_type_mappings.fw_dns.palo_apps }}"
+    service: "{{ app_type_mappings.fw_dns.palo_service }}"
+    action: "allow"

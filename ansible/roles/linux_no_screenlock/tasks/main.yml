@@ -1,0 +1,37 @@
+---
+- name: Install dconf-cli
+  ansible.builtin.apt:
+    name: dconf-cli
+    state: present
+  become: true
+
+# Ubuntu default WM is GNOME — disable screensaver and auto-lock via gsettings
+- name: Disable GNOME screensaver
+  become: false
+  community.general.dconf:
+    key: /org/gnome/desktop/screensaver/lock-enabled
+    value: "false"
+
+- name: Disable GNOME screen blank (idle delay)
+  become: false
+  community.general.dconf:
+    key: /org/gnome/desktop/session/idle-delay
+    value: "uint32 0"
+
+- name: Disable GNOME lock on suspend
+  become: false
+  community.general.dconf:
+    key: /org/gnome/desktop/screensaver/ubuntu-lock-on-suspend
+    value: "false"
+
+- name: Disable GNOME power manager screen blank
+  become: false
+  community.general.dconf:
+    key: /org/gnome/settings-daemon/plugins/power/sleep-display-ac
+    value: "0"
+
+- name: Disable GNOME power manager screen blank on battery
+  become: false
+  community.general.dconf:
+    key: /org/gnome/settings-daemon/plugins/power/sleep-display-battery
+    value: "0"

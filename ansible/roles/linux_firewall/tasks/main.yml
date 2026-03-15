@@ -1,0 +1,8 @@
+---
+- name: Apply UFW rules (Debian/Ubuntu)
+  ansible.builtin.include_tasks: ufw.yml
+  when: ansible_os_family == "Debian"
+
+- name: Apply firewalld rules (RedHat/Fedora/Oracle)
+  ansible.builtin.include_tasks: firewalld.yml
+  when: ansible_os_family == "RedHat"

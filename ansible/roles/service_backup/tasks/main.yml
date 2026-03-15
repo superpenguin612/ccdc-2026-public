@@ -1,0 +1,45 @@
+---
+# Ensure local backup directories exist on the host itself (no controller path needed).
+- name: Ensure local Linux backup root exists on host
+  ansible.builtin.file:
+    path: "{{ linux_backup_root }}"
+    state: directory
+    mode: "0700"
+    owner: root
+    group: root
+  become: true
+  when: ansible_system != 'Win32NT'
+
+- name: Ensure local Windows backup root exists on host
+  ansible.windows.win_file:
+    path: "{{ win_backup_root }}"
+    state: directory
+  when: ansible_system == 'Win32NT'
+
+- name: Back up Apache webroot and config
+  ansible.builtin.include_tasks: apache.yml
+  when: inventory_hostname in groups['svc_apache2']
+
+- name: Back up MySQL databases
+  ansible.builtin.include_tasks: mysql.yml
+  when: inventory_hostname in groups['svc_mysql']
+
+- name: Back up Postfix config and spool
+  ansible.builtin.include_tasks: postfix.yml
+  when: inventory_hostname in groups['svc_postfix']
+
+- name: Back up Splunk config
+  ansible.builtin.include_tasks: splunk.yml
+  when: inventory_hostname in groups['svc_splunk']
+
+- name: Back up IIS webroot and config
+  ansible.builtin.include_tasks: iis.yml
+  when: inventory_hostname in groups['svc_iis']
+
+- name: Back up IIS FTP root
+  ansible.builtin.include_tasks: iis_ftp.yml
+  when: inventory_hostname in groups['svc_iis_ftp']
+
+- name: Back up DNS zone files
+  ansible.builtin.include_tasks: dns.yml
+  when: inventory_hostname in groups['svc_dns']

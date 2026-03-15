@@ -1,0 +1,19 @@
+---
+- name: Ensure inventory hosts are present in controller hosts file
+  ansible.builtin.blockinfile:
+    path: "{{ controller_hosts_file_path }}"
+    marker: "{{ controller_hosts_block_marker }}"
+    create: true
+    state: present
+    block: |
+      {% for host in (groups['all'] | difference(controller_hosts_skip_hosts) | sort) %}
+      {% set ansible_host_value = hostvars[host].ansible_host | default('') %}
+      {% set ip_internal_value = hostvars[host].ip_internal | default('') %}
+      {% if ansible_host_value in controller_hosts_local_addresses %}
+      {% elif ansible_host_value not in ['', 'DHCP'] %}
+      {{ ansible_host_value }} {{ host }}
+      {% elif ip_internal_value not in ['', 'DHCP'] %}
+      {{ ip_internal_value }} {{ host }}
+      {% endif %}
+      {% endfor %}
+  become: true

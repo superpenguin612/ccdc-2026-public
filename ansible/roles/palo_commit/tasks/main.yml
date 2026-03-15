@@ -1,0 +1,9 @@
+---
+- name: Commit pending configuration
+  paloaltonetworks.panos.panos_commit_firewall:
+    provider: "{{ panos_provider }}"
+  async: 300
+  poll: 10
+  register: results
+- debug:
+    msg: "Commit with Job ID: {{ results.jobid }} had output: {{ results.details }}"

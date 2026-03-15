@@ -1,0 +1,11 @@
+---
+- name: IIS FTP — ensure backup directory exists on host
+  ansible.windows.win_file:
+    path: "{{ win_backup_root }}\\iis_ftp"
+    state: directory
+
+- name: IIS FTP — zip FTP root to local backup directory
+  ansible.windows.win_shell: |
+    $dest = "{{ win_backup_root }}\iis_ftp\iis_ftp_root.zip"
+    if (Test-Path $dest) { Remove-Item $dest -Force }
+    Compress-Archive -Path "{{ svc_iis_ftp_root }}" -DestinationPath $dest -Force

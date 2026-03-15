@@ -1,0 +1,41 @@
+---
+- name: Verify connectivity to Linux hosts
+  hosts: linux
+  gather_facts: no
+  tasks:
+    - name: Ping Linux host
+      ansible.builtin.ping:
+      become: false
+
+    - name: Report result
+      ansible.builtin.debug:
+        msg: "{{ inventory_hostname }} ({{ ansible_host }}) is reachable as {{ ansible_user }}"
+
+- name: Verify connectivity to Windows hosts
+  hosts: windows
+  gather_facts: no
+  tasks:
+    - name: Ping Windows host
+      ansible.windows.win_ping:
+
+    - name: Report result
+      ansible.builtin.debug:
+        msg: "{{ inventory_hostname }} ({{ ansible_host }}) is reachable as {{ ansible_user }}"
+
+- name: Set up palo-alto2 tunnel
+  hosts: ubuntu-wkst
+  roles:
+    - palo2_ssh_tunnel
+
+- name: Verify connectivity to Palo Alto firewalls
+  hosts: firewalls
+  gather_facts: no
+  tasks:
+    - name: Run 'show system info' via PAN-OS XML API
+      paloaltonetworks.panos.panos_op:
+        provider: "{{ panos_provider }}"
+        cmd: 'show system info'
+
+    - name: Report result
+      ansible.builtin.debug:
+        msg: "{{ inventory_hostname }} ({{ ansible_host }}) is reachable as {{ _creds.user }}"

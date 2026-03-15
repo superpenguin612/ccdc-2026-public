@@ -1,0 +1,26 @@
+---
+- name: Create Syslog Profile for Wazuh Internal
+  paloaltonetworks.panos.panos_syslog_server:
+    provider: "{{ panos_provider }}"
+    syslog_profile: "Wazuh_Syslog"
+    server_name: "Wazuh_Manager"
+    server: "{{ hostvars['{{ svc_wazuh }}']['ip_internal'] }}"
+    transport: "UDP"
+    port: 514
+    format: "BSD"
+    facility: "LOG_USER"
+  when: 
+    - groups['svc_wazuh'] | intersect(groups[protected_group] | default([])) | length == 1
+
+- name: Create Syslog Profile for Wazuh External
+  paloaltonetworks.panos.panos_syslog_server:
+    provider: "{{ panos_provider }}"
+    syslog_profile: "Wazuh_Syslog"
+    server_name: "Wazuh_Manager"
+    server: "{{ hostvars['{{ svc_wazuh }}']['ip_external'] }}"
+    transport: "UDP"
+    port: 514
+    format: "BSD"
+    facility: "LOG_USER"
+  when: 
+    - groups['svc_wazuh'] | intersect(groups[protected_group] | default([])) | length == 0

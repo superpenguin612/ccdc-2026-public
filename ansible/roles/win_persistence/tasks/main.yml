@@ -1,0 +1,521 @@
+---
+# =============================================================================
+# win_persistence — Scan for and interactively remediate Windows persistence
+# =============================================================================
+# Phase 1: Scan everything, dump reports to controller
+# Phase 2: Interactive pause prompts to disable/remove suspicious items
+
+- name: Set per-host output directory
+  ansible.builtin.set_fact:
+    _win_persist_dir: "{{ win_persistence_output_dir }}/{{ inventory_hostname }}"
+
+- name: Create local output directory
+  ansible.builtin.file:
+    path: "{{ _win_persist_dir }}"
+    state: directory
+    mode: "0700"
+  delegate_to: localhost
+  become: false
+
+# -----------------------------------------------------------------------------
+# PHASE 1 — COLLECT
+# -----------------------------------------------------------------------------
+
+# --- Scheduled Tasks ---
+- name: Dump all scheduled tasks (full)
+  ansible.windows.win_shell: |
+    Get-ScheduledTask | ForEach-Object {
+      $task = $_
+      $info = $task | Get-ScheduledTaskInfo -ErrorAction SilentlyContinue
+      $actions = ($task.Actions | ForEach-Object { $_.Execute + ' ' + $_.Arguments }) -join ' | '
+      [PSCustomObject]@{
+        TaskPath    = $task.TaskPath
+        TaskName    = $task.TaskName
+        State       = $task.State
+        Author      = $task.Principal.UserId
+        RunAs       = $task.Principal.RunLevel
+        Actions     = $actions
+        LastRun     = $info.LastRunTime
+        LastResult  = $info.LastTaskResult
+      }
+    } | Format-List | Out-String
+  register: _win_persist_tasks_full
+  changed_when: false
+
+- name: Save scheduled tasks dump
+  ansible.builtin.copy:
+    content: "{{ _win_persist_tasks_full.stdout }}"
+    dest: "{{ _win_persist_dir }}/scheduled_tasks.txt"
+  delegate_to: localhost
+  become: false
+
+- name: Find suspicious scheduled tasks
+  ansible.windows.win_shell: |
+    $pattern = '{{ win_persistence_suspicious_task_pattern }}'
+    Get-ScheduledTask | ForEach-Object {
+      $task = $_
+      $actions = ($task.Actions | ForEach-Object { ($_.Execute + ' ' + $_.Arguments).Trim() }) -join ' | '
+      if ($actions -match $pattern) {
+        "$($task.TaskPath)$($task.TaskName) | State=$($task.State) | Actions=$actions"
+      }
+    }
+  register: _win_persist_suspicious_tasks
+  changed_when: false
+
+# --- Registry Run Keys ---
+- name: Dump all Run/RunOnce registry keys
+  ansible.windows.win_shell: |
+    $keys = @(
+      'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run',
+      'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce',
+      'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Run',
+      'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\RunOnce',
+      'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run',
+      'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce'
+    )
+    foreach ($key in $keys) {
+      if (Test-Path $key) {
+        Write-Output "--- $key ---"
+        Get-ItemProperty -Path $key -ErrorAction SilentlyContinue |
+          Select-Object -Property * -ExcludeProperty PS* |
+          Format-List | Out-String
+      }
+    }
+  register: _win_persist_run_keys_full
+  changed_when: false
+
+- name: Save Run keys dump
+  ansible.builtin.copy:
+    content: "{{ _win_persist_run_keys_full.stdout }}"
+    dest: "{{ _win_persist_dir }}/run_keys.txt"
+  delegate_to: localhost
+  become: false
+
+- name: Find suspicious Run/RunOnce values
+  ansible.windows.win_shell: |
+    $pattern = '{{ win_persistence_suspicious_run_pattern }}'
+    $keys = @(
+      'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run',
+      'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce',
+      'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Run',
+      'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run',
+      'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce'
+    )
+    foreach ($key in $keys) {
+      if (Test-Path $key) {
+        $props = Get-ItemProperty -Path $key -ErrorAction SilentlyContinue
+        $props.PSObject.Properties | Where-Object { $_.Name -notmatch '^PS' } | ForEach-Object {
+          if ($_.Value -match $pattern) {
+            "KEY=$key | NAME=$($_.Name) | VALUE=$($_.Value)"
+          }
+        }
+      }
+    }
+  register: _win_persist_suspicious_run
+  changed_when: false
+
+# --- Services with non-standard paths ---
+- name: Dump all non-Windows services
+  ansible.windows.win_shell: |
+    Get-CimInstance -ClassName Win32_Service |
+      Where-Object { $_.PathName -and $_.PathName -notmatch '^"?C:\\Windows\\' } |
+      Select-Object Name, DisplayName, State, StartMode, PathName, StartName |
+      Format-List | Out-String
+  register: _win_persist_services_full
+  changed_when: false
+
+- name: Save non-standard services dump
+  ansible.builtin.copy:
+    content: "{{ _win_persist_services_full.stdout }}"
+    dest: "{{ _win_persist_dir }}/services_nonstandard.txt"
+  delegate_to: localhost
+  become: false
+
+- name: Find suspicious service binary paths
+  ansible.windows.win_shell: |
+    $pattern = '{{ win_persistence_suspicious_svc_pattern }}'
+    Get-CimInstance -ClassName Win32_Service |
+      Where-Object { $_.PathName -and $_.PathName -notmatch '^"?C:\\Windows\\' -and $_.PathName -notmatch '^"?C:\\Program Files' } |
+      ForEach-Object {
+        if ($_.PathName -match $pattern) {
+          "NAME=$($_.Name) | STATE=$($_.State) | PATH=$($_.PathName)"
+        }
+      }
+  register: _win_persist_suspicious_svcs
+  changed_when: false
+
+# --- Startup Folders ---
+- name: Dump startup folder contents
+  ansible.windows.win_shell: |
+    $folders = @(
+      "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup",
+      "C:\ProgramData\Microsoft\Windows\Start Menu\Programs\StartUp"
+    )
+    foreach ($folder in $folders) {
+      if (Test-Path $folder) {
+        Write-Output "--- $folder ---"
+        Get-ChildItem -Path $folder -Force | Format-List Name, FullName, LastWriteTime | Out-String
+      }
+    }
+  register: _win_persist_startup_full
+  changed_when: false
+
+- name: Save startup folder dump
+  ansible.builtin.copy:
+    content: "{{ _win_persist_startup_full.stdout }}"
+    dest: "{{ _win_persist_dir }}/startup_folders.txt"
+  delegate_to: localhost
+  become: false
+
+# --- WMI Subscriptions ---
+- name: Dump WMI event subscriptions
+  ansible.windows.win_shell: |
+    Write-Output "=== EventFilters ==="
+    Get-WMIObject -Namespace root\subscription -Class __EventFilter -ErrorAction SilentlyContinue |
+      Select-Object Name, Query, QueryLanguage | Format-List | Out-String
+    Write-Output "=== EventConsumers ==="
+    Get-WMIObject -Namespace root\subscription -Class __EventConsumer -ErrorAction SilentlyContinue |
+      Format-List | Out-String
+    Write-Output "=== FilterToConsumerBindings ==="
+    Get-WMIObject -Namespace root\subscription -Class __FilterToConsumerBinding -ErrorAction SilentlyContinue |
+      Format-List | Out-String
+  register: _win_persist_wmi_full
+  changed_when: false
+
+- name: Save WMI subscriptions dump
+  ansible.builtin.copy:
+    content: "{{ _win_persist_wmi_full.stdout }}"
+    dest: "{{ _win_persist_dir }}/wmi_subscriptions.txt"
+  delegate_to: localhost
+  become: false
+
+- name: Check for any WMI EventFilter subscriptions
+  ansible.windows.win_shell: |
+    $filters = Get-WMIObject -Namespace root\subscription -Class __EventFilter -ErrorAction SilentlyContinue |
+      Where-Object { $_.Name -ne 'BVTFilter' }
+    if ($filters) {
+      $filters | ForEach-Object { "WMI_FILTER: $($_.Name) | Query: $($_.Query)" }
+    }
+  register: _win_persist_suspicious_wmi
+  changed_when: false
+
+# --- AppInit_DLLs ---
+- name: Check AppInit_DLLs registry keys
+  ansible.windows.win_shell: |
+    $keys = @(
+      'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Windows',
+      'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows NT\CurrentVersion\Windows'
+    )
+    foreach ($key in $keys) {
+      if (Test-Path $key) {
+        $val = (Get-ItemProperty -Path $key -Name AppInit_DLLs -ErrorAction SilentlyContinue).AppInit_DLLs
+        if ($val -and $val -ne '') {
+          "APPINIT_DLL: KEY=$key | VALUE=$val"
+        }
+      }
+    }
+  register: _win_persist_appinit
+  changed_when: false
+
+# --- PowerShell Profiles ---
+- name: Check PowerShell profile files for suspicious content
+  ansible.windows.win_shell: |
+    $profiles = @(
+      "$env:SystemRoot\System32\WindowsPowerShell\v1.0\profile.ps1",
+      "$env:SystemRoot\System32\WindowsPowerShell\v1.0\Microsoft.PowerShell_profile.ps1",
+      "$env:USERPROFILE\Documents\WindowsPowerShell\profile.ps1",
+      "$env:USERPROFILE\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1",
+      "$env:USERPROFILE\Documents\PowerShell\profile.ps1",
+      "$env:USERPROFILE\Documents\PowerShell\Microsoft.PowerShell_profile.ps1"
+    )
+    $pattern = 'iex|invoke-expression|downloadstring|webclient|bypass|encoded|hidden|-e |\.vbs|\.js|wscript|mshta'
+    foreach ($p in $profiles) {
+      if (Test-Path $p) {
+        $content = Get-Content -Path $p -Raw -ErrorAction SilentlyContinue
+        if ($content -match $pattern) {
+          "SUSPICIOUS_PROFILE: $p | Content: $($content.Substring(0, [Math]::Min(200, $content.Length)))"
+        } else {
+          "CLEAN_PROFILE: $p | Size: $((Get-Item $p).Length) bytes"
+        }
+      }
+    }
+  register: _win_persist_profiles
+  changed_when: false
+
+# --- Save full summary report ---
+- name: Build combined scan report
+  ansible.builtin.copy:
+    content: |
+      ============================================================
+      WIN PERSISTENCE SCAN REPORT — {{ inventory_hostname }}
+      Generated: {{ ansible_date_time.iso8601 | default('unknown') }}
+      ============================================================
+
+      === SUSPICIOUS SCHEDULED TASKS ===
+      {{ _win_persist_suspicious_tasks.stdout | default('(none found)') }}
+
+      === SUSPICIOUS RUN KEYS ===
+      {{ _win_persist_suspicious_run.stdout | default('(none found)') }}
+
+      === SUSPICIOUS SERVICES ===
+      {{ _win_persist_suspicious_svcs.stdout | default('(none found)') }}
+
+      === WMI SUBSCRIPTIONS (non-built-in) ===
+      {{ _win_persist_suspicious_wmi.stdout | default('(none found)') }}
+
+      === APPINIT_DLLS ===
+      {{ _win_persist_appinit.stdout | default('(none found)') }}
+
+      === POWERSHELL PROFILES ===
+      {{ _win_persist_profiles.stdout | default('(none found)') }}
+
+      === STARTUP FOLDER CONTENTS ===
+      {{ _win_persist_startup_full.stdout | default('(none found)') }}
+    dest: "{{ _win_persist_dir }}/persistence_scan.txt"
+  delegate_to: localhost
+  become: false
+
+# Print findings to console
+- name: Print suspicious scheduled tasks
+  ansible.builtin.debug:
+    msg: |
+      [{{ inventory_hostname }}] SUSPICIOUS SCHEDULED TASKS:
+      {{ _win_persist_suspicious_tasks.stdout | default('(none)') }}
+  when: _win_persist_suspicious_tasks.stdout | trim | length > 0
+
+- name: Print suspicious Run keys
+  ansible.builtin.debug:
+    msg: |
+      [{{ inventory_hostname }}] SUSPICIOUS RUN KEYS:
+      {{ _win_persist_suspicious_run.stdout | default('(none)') }}
+  when: _win_persist_suspicious_run.stdout | trim | length > 0
+
+- name: Print suspicious services
+  ansible.builtin.debug:
+    msg: |
+      [{{ inventory_hostname }}] SUSPICIOUS SERVICES:
+      {{ _win_persist_suspicious_svcs.stdout | default('(none)') }}
+  when: _win_persist_suspicious_svcs.stdout | trim | length > 0
+
+- name: Print WMI subscriptions
+  ansible.builtin.debug:
+    msg: |
+      [{{ inventory_hostname }}] WMI SUBSCRIPTIONS:
+      {{ _win_persist_suspicious_wmi.stdout | default('(none)') }}
+  when: _win_persist_suspicious_wmi.stdout | trim | length > 0
+
+- name: Print AppInit DLL findings
+  ansible.builtin.debug:
+    msg: |
+      [{{ inventory_hostname }}] APPINIT_DLLS:
+      {{ _win_persist_appinit.stdout | default('(none)') }}
+  when: _win_persist_appinit.stdout | trim | length > 0
+
+- name: Print PowerShell profile findings
+  ansible.builtin.debug:
+    msg: |
+      [{{ inventory_hostname }}] POWERSHELL PROFILES:
+      {{ _win_persist_profiles.stdout | default('(none)') }}
+  when: _win_persist_profiles.stdout | trim | length > 0
+
+# -----------------------------------------------------------------------------
+# PHASE 2 — INTERACTIVE REMEDIATION
+# -----------------------------------------------------------------------------
+
+# --- Scheduled Tasks ---
+- name: "REMEDIATE | Prompt to disable suspicious scheduled tasks"
+  ansible.builtin.pause:
+    prompt: |
+      [{{ inventory_hostname }}] Suspicious scheduled tasks found:
+      {{ _win_persist_suspicious_tasks.stdout }}
+
+      Disable ALL suspicious scheduled tasks listed above? (y/N)
+  register: _win_persist_task_choice
+  when: _win_persist_suspicious_tasks.stdout | trim | length > 0
+
+- name: "REMEDIATE | Disable suspicious scheduled tasks"
+  ansible.windows.win_shell: |
+    $pattern = '{{ win_persistence_suspicious_task_pattern }}'
+    Get-ScheduledTask | ForEach-Object {
+      $task = $_
+      $actions = ($task.Actions | ForEach-Object { ($_.Execute + ' ' + $_.Arguments).Trim() }) -join ' | '
+      if ($actions -match $pattern -and $task.State -ne 'Disabled') {
+        try {
+          Disable-ScheduledTask -TaskPath $task.TaskPath -TaskName $task.TaskName -ErrorAction Stop
+          Write-Output "DISABLED: $($task.TaskPath)$($task.TaskName)"
+        } catch {
+          Write-Output "FAILED: $($task.TaskPath)$($task.TaskName) — $($_.Exception.Message)"
+        }
+      }
+    }
+  when:
+    - _win_persist_suspicious_tasks.stdout | trim | length > 0
+    - _win_persist_task_choice.user_input | lower == 'y'
+  register: _win_persist_task_result
+
+- name: "REMEDIATE | Show scheduled task remediation result"
+  ansible.builtin.debug:
+    msg: "{{ _win_persist_task_result.stdout }}"
+  when:
+    - _win_persist_task_result is defined
+    - _win_persist_task_result.stdout is defined
+
+# --- Run Keys ---
+- name: "REMEDIATE | Prompt to delete suspicious Run keys (review manually)"
+  ansible.builtin.pause:
+    prompt: |
+      [{{ inventory_hostname }}] Suspicious Run/RunOnce registry entries found:
+      {{ _win_persist_suspicious_run.stdout }}
+
+      WARNING: Review the output above carefully. This will DELETE the listed registry values.
+      Delete ALL suspicious Run key values listed above? (y/N)
+  register: _win_persist_run_choice
+  when: _win_persist_suspicious_run.stdout | trim | length > 0
+
+- name: "REMEDIATE | Delete suspicious Run key values"
+  ansible.windows.win_shell: |
+    $pattern = '{{ win_persistence_suspicious_run_pattern }}'
+    $keys = @(
+      'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run',
+      'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce',
+      'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Run',
+      'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run',
+      'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce'
+    )
+    foreach ($key in $keys) {
+      if (Test-Path $key) {
+        $props = Get-ItemProperty -Path $key -ErrorAction SilentlyContinue
+        $props.PSObject.Properties | Where-Object { $_.Name -notmatch '^PS' } | ForEach-Object {
+          if ($_.Value -match $pattern) {
+            try {
+              Remove-ItemProperty -Path $key -Name $_.Name -ErrorAction Stop
+              Write-Output "DELETED: KEY=$key | NAME=$($_.Name)"
+            } catch {
+              Write-Output "FAILED: KEY=$key | NAME=$($_.Name) | ERROR=$($_.Exception.Message)"
+            }
+          }
+        }
+      }
+    }
+  when:
+    - _win_persist_suspicious_run.stdout | trim | length > 0
+    - _win_persist_run_choice.user_input | lower == 'y'
+  register: _win_persist_run_result
+
+- name: "REMEDIATE | Show Run key remediation result"
+  ansible.builtin.debug:
+    msg: "{{ _win_persist_run_result.stdout }}"
+  when:
+    - _win_persist_run_result is defined
+    - _win_persist_run_result.stdout is defined
+
+# --- Suspicious Services ---
+- name: "REMEDIATE | Prompt to stop and disable suspicious services"
+  ansible.builtin.pause:
+    prompt: |
+      [{{ inventory_hostname }}] Suspicious services found:
+      {{ _win_persist_suspicious_svcs.stdout }}
+
+      Stop and disable ALL suspicious services listed above? (y/N)
+  register: _win_persist_svc_choice
+  when: _win_persist_suspicious_svcs.stdout | trim | length > 0
+
+- name: "REMEDIATE | Stop and disable suspicious services"
+  ansible.windows.win_shell: |
+    $pattern = '{{ win_persistence_suspicious_svc_pattern }}'
+    Get-CimInstance -ClassName Win32_Service |
+      Where-Object { $_.PathName -and $_.PathName -notmatch '^"?C:\\Windows\\' -and $_.PathName -notmatch '^"?C:\\Program Files' } |
+      ForEach-Object {
+        if ($_.PathName -match $pattern) {
+          try {
+            Stop-Service -Name $_.Name -Force -ErrorAction SilentlyContinue
+            Set-Service -Name $_.Name -StartupType Disabled -ErrorAction Stop
+            Write-Output "DISABLED: $($_.Name) | Path: $($_.PathName)"
+          } catch {
+            Write-Output "FAILED: $($_.Name) | Error: $($_.Exception.Message)"
+          }
+        }
+      }
+  when:
+    - _win_persist_suspicious_svcs.stdout | trim | length > 0
+    - _win_persist_svc_choice.user_input | lower == 'y'
+  register: _win_persist_svc_result
+
+- name: "REMEDIATE | Show service remediation result"
+  ansible.builtin.debug:
+    msg: "{{ _win_persist_svc_result.stdout }}"
+  when:
+    - _win_persist_svc_result is defined
+    - _win_persist_svc_result.stdout is defined
+
+# --- WMI Subscriptions ---
+- name: "REMEDIATE | Prompt to remove WMI event subscriptions"
+  ansible.builtin.pause:
+    prompt: |
+      [{{ inventory_hostname }}] WMI event subscriptions found:
+      {{ _win_persist_suspicious_wmi.stdout }}
+
+      Remove ALL non-built-in WMI event subscriptions (filters, consumers, bindings)? (y/N)
+  register: _win_persist_wmi_choice
+  when: _win_persist_suspicious_wmi.stdout | trim | length > 0
+
+- name: "REMEDIATE | Remove WMI event subscriptions"
+  ansible.windows.win_shell: |
+    $removed = @()
+    # Remove bindings first (to avoid orphan errors), then consumers, then filters
+    Get-WMIObject -Namespace root\subscription -Class __FilterToConsumerBinding -ErrorAction SilentlyContinue |
+      ForEach-Object { $_.Delete(); $removed += "BINDING removed" }
+    Get-WMIObject -Namespace root\subscription -Class __EventConsumer -ErrorAction SilentlyContinue |
+      ForEach-Object { $name = $_.Name; $_.Delete(); $removed += "CONSUMER removed: $name" }
+    Get-WMIObject -Namespace root\subscription -Class __EventFilter -ErrorAction SilentlyContinue |
+      Where-Object { $_.Name -ne 'BVTFilter' } |
+      ForEach-Object { $name = $_.Name; $_.Delete(); $removed += "FILTER removed: $name" }
+    if ($removed) { $removed -join "`n" } else { "Nothing to remove." }
+  when:
+    - _win_persist_suspicious_wmi.stdout | trim | length > 0
+    - _win_persist_wmi_choice.user_input | lower == 'y'
+  register: _win_persist_wmi_result
+
+- name: "REMEDIATE | Show WMI remediation result"
+  ansible.builtin.debug:
+    msg: "{{ _win_persist_wmi_result.stdout }}"
+  when:
+    - _win_persist_wmi_result is defined
+    - _win_persist_wmi_result.stdout is defined
+
+# --- AppInit_DLLs ---
+- name: "REMEDIATE | Prompt to clear AppInit_DLLs"
+  ansible.builtin.pause:
+    prompt: |
+      [{{ inventory_hostname }}] AppInit_DLLs found:
+      {{ _win_persist_appinit.stdout }}
+
+      Clear AppInit_DLLs values (set to empty string)? (y/N)
+  register: _win_persist_appinit_choice
+  when: _win_persist_appinit.stdout | trim | length > 0
+
+- name: "REMEDIATE | Clear AppInit_DLLs"
+  ansible.windows.win_regedit:
+    path: "{{ item }}"
+    name: AppInit_DLLs
+    data: ''
+    type: string
+  loop:
+    - HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Windows
+    - HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows NT\CurrentVersion\Windows
+  when:
+    - _win_persist_appinit.stdout | trim | length > 0
+    - _win_persist_appinit_choice.user_input | lower == 'y'
+
+- name: "REMEDIATE | Also disable AppInit_DLLs load (RequireSignedAppInit_DLLs)"
+  ansible.windows.win_regedit:
+    path: "{{ item }}"
+    name: LoadAppInit_DLLs
+    data: 0
+    type: dword
+  loop:
+    - HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Windows
+    - HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows NT\CurrentVersion\Windows
+  when:
+    - _win_persist_appinit.stdout | trim | length > 0
+    - _win_persist_appinit_choice.user_input | lower == 'y'

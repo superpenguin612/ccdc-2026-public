@@ -1,0 +1,16 @@
+---
+- name: Allow inbound SMTP
+  paloaltonetworks.panos.panos_security_rule:
+    provider: "{{ panos_provider }}"
+    rule_name: "Inbound_SMTP_{{ hostvars[host_item]['inventory_hostname'] }}"
+    source_zone: ["external"]
+    source_ip: ["any"]
+    destination_zone: ["internal"]
+    destination_ip: ["External_{{ hostvars[host_item]['inventory_hostname'] }}"]
+    application: "{{ app_type_mappings.fw_smtp.palo_apps }}"
+    service: "{{ app_type_mappings.fw_smtp.palo_service }}"
+    action: "allow"
+    log_setting: "{{ palo_log_setting }}"
+  loop: "{{ groups['fw_smtp'] | default([]) | intersect(groups[protected_group] | default([])) }}"
+  loop_control:
+    loop_var: host_item

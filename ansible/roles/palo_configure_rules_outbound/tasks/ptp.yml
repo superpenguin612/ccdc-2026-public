@@ -1,0 +1,12 @@
+---
+- name: Allow Outbound PTP
+  paloaltonetworks.panos.panos_security_rule:
+    provider: "{{ panos_provider }}"
+    rule_name: "Outbound_PTP"
+    source_zone: ["internal"]
+    source_ip: ["Internal_Net"]
+    destination_zone: ["external"]
+    destination_ip: ["any"]
+    application: "{{ app_type_mappings.fw_ptp.palo_apps }}"
+    service: "{{ app_type_mappings.fw_ptp.palo_service }}"
+    action: "allow"

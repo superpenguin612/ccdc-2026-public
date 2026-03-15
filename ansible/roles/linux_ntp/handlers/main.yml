@@ -1,0 +1,10 @@
+---
+- name: Restart chrony
+  ansible.builtin.service:
+    name: "{{ 'chronyd' if ansible_os_family == 'RedHat' else 'chrony' }}"
+    state: restarted
+  become: true
+
+- name: Force NTP step sync
+  ansible.builtin.command: chronyc makestep
+  become: true

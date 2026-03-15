@@ -1,0 +1,22 @@
+---
+- name: Splunk — stop service
+  ansible.builtin.command: "{{ svc_splunk_home }}/bin/splunk stop"
+  become: true
+  failed_when: false
+
+- name: Splunk — wipe existing etc/ directory
+  ansible.builtin.file:
+    path: "{{ svc_splunk_home }}/etc"
+    state: absent
+  become: true
+
+- name: Splunk — restore etc/ directory from local backup
+  ansible.builtin.unarchive:
+    src: "{{ linux_backup_root }}/splunk/splunk_etc.tar.gz"
+    dest: "{{ svc_splunk_home }}"
+    remote_src: true
+  become: true
+
+- name: Splunk — start service
+  ansible.builtin.command: "{{ svc_splunk_home }}/bin/splunk start --accept-license"
+  become: true

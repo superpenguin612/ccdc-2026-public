@@ -1,0 +1,17 @@
+---
+# Copies the self-contained dockerize script to the host.
+# Run manually: sudo bash /root/opencart_dockerize.sh
+
+- name: Dockerize — copy script to host
+  ansible.builtin.copy:
+    src: opencart_dockerize.sh
+    dest: /root/opencart_dockerize.sh
+    owner: root
+    group: root
+    mode: "0700"
+    force: true
+  become: true
+
+- name: Dockerize — remind how to run
+  ansible.builtin.debug:
+    msg: "Script copied. Run: sudo bash /root/opencart_dockerize.sh"

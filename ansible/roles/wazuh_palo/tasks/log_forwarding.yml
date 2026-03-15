@@ -1,0 +1,17 @@
+- name: Configure Log Forwarding Profile for Traffic
+  paloaltonetworks.panos.panos_log_forwarding_profile_match_list:
+    provider: "{{ panos_provider }}"
+    log_forwarding_profile: "Wazuh_Forwarding"
+    name: "Send-Traffic-Logs"
+    log_type: "traffic"
+    filter: "All Logs"
+    syslog_profiles: ["Wazuh_Syslog"]
+
+- name: Configure Log Forwarding Profile for Threats
+  paloaltonetworks.panos.panos_log_forwarding_profile_match_list:
+    provider: "{{ panos_provider }}"
+    log_forwarding_profile: "Wazuh_Forwarding"
+    name: "Send-Threat-Logs"
+    log_type: "threat"
+    filter: "All Logs"
+    syslog_profiles: ["Wazuh_Syslog"]

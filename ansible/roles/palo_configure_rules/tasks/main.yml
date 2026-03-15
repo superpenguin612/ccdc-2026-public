@@ -1,0 +1,20 @@
+---
+- include_tasks: http.yml
+- include_tasks: https.yml
+- include_tasks: splunk_web.yml
+- include_tasks: splunk_forwarder.yml
+- include_tasks: smtp.yml
+- include_tasks: imap.yml
+- include_tasks: pop3.yml
+- include_tasks: dns.yml
+- include_tasks: ftp.yml
+- include_tasks: ad.yml
+- include_tasks: ldap.yml
+- include_tasks: kerberos.yml
+- include_tasks: msrpc.yml
+- include_tasks: smb.yml
+- include_tasks: ssh_scored.yml
+- include_tasks: ssh_ansible.yml    # Dynamically checks if ubuntu-wkst is in palo group, if not creates a rule allowing ssh connections from wkst
+- include_tasks: wazuh_forwarder.yml
+# - include_tasks: wazuh_web.yml    // not a scored service so can be ignored
+- include_tasks: default_deny_in.yml

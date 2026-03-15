@@ -1,0 +1,20 @@
+---
+- name: Verify key-based SSH connection
+  ansible.windows.win_ping:
+
+- name: Stop and disable WinRM service
+  ansible.windows.win_service:
+    name: WinRM
+    start_mode: disabled
+    state: stopped
+
+- name: Remove WinRM firewall rules
+  ansible.windows.win_powershell:
+    script: |
+      Get-NetFirewallRule | Where-Object {
+        $_.DisplayName -like "*WinRM*" -or $_.DisplayName -like "*Remote Management*"
+      } | Remove-NetFirewallRule
+
+- name: Print confirmation
+  ansible.builtin.debug:
+    msg: "{{ inventory_hostname }}: OpenSSH on port {{ windows_ssh_port }} (key-only), WinRM disabled."

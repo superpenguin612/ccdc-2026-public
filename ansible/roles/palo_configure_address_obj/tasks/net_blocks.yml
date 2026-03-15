@@ -1,0 +1,12 @@
+---
+- name: Create Internal_Net Address Object
+  paloaltonetworks.panos.panos_address_object:
+    provider: "{{ panos_provider }}"
+    name: "Internal_Net"
+    value: "{{ int_net }}"
+
+- name: Create Public_Net Address Object
+  paloaltonetworks.panos.panos_address_object:
+    provider: "{{ panos_provider }}"
+    name: "Public_Net"
+    value: "{{ pub_net }}"

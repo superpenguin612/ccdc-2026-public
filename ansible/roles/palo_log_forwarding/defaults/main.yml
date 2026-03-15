@@ -1,0 +1,15 @@
+---
+# Wazuh server IP (must be reachable from the Palo's data plane)
+palo_log_wazuh_ip: "{{ hostvars['splunk']['ip_internal'] }}"
+
+# Syslog server profile name (referenced by the log forwarding profile)
+palo_log_syslog_profile_name: "Wazuh-Syslog"
+
+# Log forwarding profile name (referenced by each security rule via log_setting)
+palo_log_forwarding_profile_name: "CCDC-Wazuh"
+
+# Syslog transport/format/port
+palo_log_syslog_transport: "UDP"
+palo_log_syslog_port: 514
+palo_log_syslog_format: "BSD"
+palo_log_syslog_facility: "LOG_USER"

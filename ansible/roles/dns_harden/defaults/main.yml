@@ -1,0 +1,19 @@
+---
+# Randomize source ports on outgoing queries (anti-spoofing / Kaminsky attack)
+# Default Windows value is 2500; 10000 is the max
+dns_harden_socket_pool_size: 10000
+
+# Prevent cached entries from being overwritten before their TTL expires
+dns_harden_cache_locking: true
+dns_harden_cache_lock_percent: 100
+
+# Disable AXFR zone transfers — prevents zone data exfiltration
+# AD-integrated zones use AD replication, not AXFR, so this is safe
+dns_harden_disable_zone_transfers: true
+
+# CVE mitigation — restrict DNS TCP receive packet size
+dns_harden_cve_tcp_packet_size: true
+
+# Enable DNS Server Audit event log channel
+# Captures zone changes and dynamic updates — useful for incident report scoring
+dns_harden_enable_audit_log: true

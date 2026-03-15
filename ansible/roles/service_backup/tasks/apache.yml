@@ -1,0 +1,27 @@
+---
+- name: Apache — ensure backup directory exists on host
+  ansible.builtin.file:
+    path: "{{ linux_backup_root }}/apache"
+    state: directory
+    mode: "0700"
+    owner: root
+    group: root
+  become: true
+
+- name: Apache — archive webroot
+  ansible.builtin.command: >
+    tar -czf {{ linux_backup_root }}/apache/apache_webroot.tar.gz
+    -C / {{ svc_apache2_webroot | regex_replace('^/', '') }}
+  become: true
+
+- name: Apache — archive full /etc/apache2
+  ansible.builtin.command: >
+    tar -czf {{ linux_backup_root }}/apache/apache_config.tar.gz
+    -C / etc/apache2
+  become: true
+
+- name: Apache — record installed packages
+  ansible.builtin.shell: >
+    dpkg -l | grep -E '^ii\s+(apache2|libapache2)' | awk '{print $2}'
+    > {{ linux_backup_root }}/apache/apache_packages.txt
+  become: true

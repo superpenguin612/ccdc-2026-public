@@ -1,0 +1,26 @@
+  <syscheck>
+    <disabled>no</disabled>
+    <frequency>43200</frequency>
+    <scan_on_start>yes</scan_on_start>
+    <alert_new_files>yes</alert_new_files>
+    <auto_ignore frequency="10" timeframe="3600">no</auto_ignore>
+
+{% set all_dirs = wazuh_fim_dirs + wazuh_fim_extra_dirs %}
+{% for dir in all_dirs %}
+    <directories realtime="yes"{% if dir.report_changes is defined %} report_changes="{{ dir.report_changes }}"{% endif %} check_all="yes">{{ dir.path }}</directories>
+{% endfor %}
+
+    <!-- Ignore noisy paths -->
+    <ignore>/etc/mtab</ignore>
+    <ignore>/etc/hosts.deny</ignore>
+    <ignore>/etc/mail/statistics</ignore>
+    <ignore>/etc/random-seed</ignore>
+    <ignore>/etc/adjtime</ignore>
+    <ignore>/etc/httpd/logs</ignore>
+    <ignore>/etc/utmpx</ignore>
+    <ignore>/etc/wtmpx</ignore>
+    <ignore>/etc/cups/certs</ignore>
+    <ignore>/etc/dumpdates</ignore>
+    <ignore>/etc/svc/volatile</ignore>
+    <ignore type="sregex">.log$|.swp$</ignore>
+  </syscheck>

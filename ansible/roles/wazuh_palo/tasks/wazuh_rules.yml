@@ -1,0 +1,11 @@
+- name: Attach Wazuh Log Forwarding to all Security Rules
+  paloaltonetworks.panos.panos_security_rule:
+    provider: "{{ panos_provider }}"
+    rule_name: "{{ item }}"
+    log_forwarding: "Wazuh_Forwarding"
+    # Essential for incident response: log when the connection terminates
+    log_end: true 
+    commit: false
+  # Reusing your pipelined logic to grab all user-defined rules
+  loop: "{{ rule_output.gathered | map(attribute='rule_name') | reject('match', '^intrazone-default$|^interzone-default$') | list }}"
+  when: rule_output.gathered | default([]) | length > 0

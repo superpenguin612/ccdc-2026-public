@@ -1,0 +1,28 @@
+---
+splunk_version: "10.0.2"
+splunk_build:   "e2d18b4767e9"
+
+# Tarball filename — must be present at files/{{ installer_tgz_name }}
+installer_tgz_name: "splunkforwarder-{{ splunk_version }}-{{ splunk_build }}-Linux-x86_64.tgz"
+installer_dest: /tmp/splunkforwarder.tgz
+install_dir:    /opt/splunkforwarder
+
+# Splunk indexer — internal IP, Windows zone routes through firewall
+splunk_indexer_ip:   "{{ hostvars['splunk']['ip_internal'] }}"
+splunk_indexer_port: 9997
+
+# Forwarder admin credentials (set in vault)
+# vault_splunk_uf_password: "..."
+splunk_user: admin
+splunk_pass: "{{ vault_splunk_uf_password | default('changeme') }}"
+
+# Server name shown in Splunk
+splunk_server_name: "CCDC-{{ inventory_hostname }}"
+
+# Default index for Linux OS events
+splunk_linux_index: "linux"
+
+# Technology Add-on archives — must be present at files/<name>
+# Download from splunkbase.splunk.com before competition
+linux_ta_archives:
+  - "splunk-add-on-for-unix-and-linux_900.tgz"

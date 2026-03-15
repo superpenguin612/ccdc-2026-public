@@ -1,0 +1,16 @@
+---
+- name: IIS FTP — stop FTPSVC
+  ansible.windows.win_service:
+    name: FTPSVC
+    state: stopped
+
+- name: IIS FTP — wipe and restore FTP root from local backup
+  ansible.windows.win_shell: |
+    $dest = "{{ svc_iis_ftp_root }}"
+    if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
+    Expand-Archive -Path "{{ win_backup_root }}\iis_ftp\iis_ftp_root.zip" -DestinationPath (Split-Path $dest -Parent) -Force
+
+- name: IIS FTP — start FTPSVC
+  ansible.windows.win_service:
+    name: FTPSVC
+    state: started

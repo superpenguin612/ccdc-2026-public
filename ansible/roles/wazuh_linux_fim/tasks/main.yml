@@ -1,0 +1,15 @@
+---
+- name: Ensure Wazuh agent is installed
+  ansible.builtin.package:
+    name: wazuh-agent
+    state: present
+  become: true
+
+- name: Configure FIM syscheck block in ossec.conf
+  ansible.builtin.blockinfile:
+    path: /var/ossec/etc/ossec.conf
+    marker: "  <!-- {mark} ANSIBLE MANAGED SYSCHECK -->"
+    insertafter: "<ossec_config>"
+    block: "{{ lookup('template', 'syscheck.xml.j2') }}"
+  become: true
+  notify: Restart wazuh-agent

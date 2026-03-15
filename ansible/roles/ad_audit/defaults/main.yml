@@ -1,0 +1,35 @@
+---
+# Where to save the audit report on the remote DC
+ad_audit_report_remote_path: "C:\\Windows\\Temp\\ad_audit_report.txt"
+
+# Where to save the remediation log on the remote DC
+ad_audit_remediate_log_remote_path: "C:\\Windows\\Temp\\ad_remediate_log.txt"
+
+# Fetch reports back to the Ansible controller
+ad_audit_fetch_report: true
+
+# Local directory on controller to store fetched reports
+ad_audit_report_local_dir: "{{ playbook_dir }}/../../reports"
+
+# ---------------------------------------------------------------------------
+# Remediation toggles — set to true to automatically fix findings
+# ---------------------------------------------------------------------------
+
+# Run any remediation at all
+ad_audit_remediate: true
+
+# Fix 1: Enable Kerberos pre-auth (eliminate AS-REP roasting)
+# SAFE — does not break any services, only requires clients to send a pre-auth
+ad_audit_fix_asrep: true
+
+# Fix 2: Remove unconstrained delegation from non-DC computer accounts
+# SAFE — unconstrained delegation is almost never legitimately needed on workstations/member servers
+ad_audit_fix_unconstrained_delegation: true
+
+# Fix 3: Remove Everyone/Authenticated Users from Pre-Windows 2000 Compatible Access
+# SAFE — modern environments don't need unauthenticated LDAP enumeration
+ad_audit_fix_prewin2k: true
+
+# Fix 4: Clear shadow credentials (msDS-KeyCredentialLink) from all non-DC accounts
+# SAFE for CCDC — shadow creds are a red team backdoor mechanism; no legitimate cert-based auth in CCDC
+ad_audit_fix_shadow_creds: true

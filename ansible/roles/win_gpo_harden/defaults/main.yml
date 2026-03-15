@@ -1,0 +1,10 @@
+---
+# Enable advanced audit policy via auditpol
+win_gpo_harden_audit_policy: true
+
+# Account lockout: lock after N bad attempts for M minutes
+win_gpo_harden_account_lockout: true
+win_gpo_harden_lockout_threshold: 5
+win_gpo_harden_lockout_duration: 30
+win_gpo_harden_lockout_window: 30
+

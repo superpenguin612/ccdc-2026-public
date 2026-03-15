@@ -1,0 +1,13 @@
+---
+- name: Allow inbound SSH for Honeypot
+  paloaltonetworks.panos.panos_security_rule:
+    provider: "{{ panos_provider }}"
+    rule_name: "Inbound_SSH_Honeypot"
+    source_zone: ["external"]
+    source_ip: ["any"]
+    destination_zone: ["internal"]
+    destination_ip: ["Internal_Net"]
+    application: "{{ app_type_mappings.fw_honey.palo_apps }}"
+    service: "{{ app_type_mappings.fw_honey.palo_service }}"
+    action: "allow"
+    log_setting: "{{ palo_log_setting }}"

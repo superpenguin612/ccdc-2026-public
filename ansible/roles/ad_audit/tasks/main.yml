@@ -1,0 +1,93 @@
+---
+# ---------------------------------------------------------------------------
+# AD Privilege Audit & Remediation
+# Covers: AS-REP roasting, Kerberoasting, unconstrained delegation,
+#         RBCD, DCSync rights, AdminSDHolder, shadow creds, SID history,
+#         GPO write access, privileged group membership, and more.
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# 1. Copy scripts to target
+# ---------------------------------------------------------------------------
+- name: AD Audit — copy audit script to DC
+  ansible.windows.win_copy:
+    src: ad_audit.ps1
+    dest: C:\Windows\Temp\ad_audit.ps1
+
+- name: AD Audit — copy remediation script to DC
+  ansible.windows.win_copy:
+    src: ad_remediate.ps1
+    dest: C:\Windows\Temp\ad_remediate.ps1
+  when: ad_audit_remediate
+
+# ---------------------------------------------------------------------------
+# 2. Run audit
+# ---------------------------------------------------------------------------
+- name: AD Audit — run comprehensive privilege audit
+  ansible.windows.win_shell: |
+    powershell.exe -ExecutionPolicy Bypass -NonInteractive -File C:\Windows\Temp\ad_audit.ps1 `
+        -OutputPath "{{ ad_audit_report_remote_path }}"
+  register: ad_audit_run
+  changed_when: false
+  failed_when: ad_audit_run.rc != 0 and 'DONE:' not in ad_audit_run.stdout
+
+- name: AD Audit — display summary
+  ansible.builtin.debug:
+    msg: "{{ ad_audit_run.stdout_lines | select('match', 'DONE:') | list }}"
+
+# ---------------------------------------------------------------------------
+# 3. Fetch report back to controller
+# ---------------------------------------------------------------------------
+- name: AD Audit — fetch report to controller
+  ansible.builtin.fetch:
+    src: "{{ ad_audit_report_remote_path }}"
+    dest: "{{ ad_audit_report_local_dir }}/{{ inventory_hostname }}_ad_audit_{{ ansible_date_time.date }}.txt"
+    flat: true
+  when: ad_audit_fetch_report
+
+- name: AD Audit — show local report path
+  ansible.builtin.debug:
+    msg: "Report saved to: {{ ad_audit_report_local_dir }}/{{ inventory_hostname }}_ad_audit_{{ ansible_date_time.date }}.txt"
+  when: ad_audit_fetch_report
+
+# ---------------------------------------------------------------------------
+# 4. Run remediation (controlled by defaults)
+# ---------------------------------------------------------------------------
+- name: AD Audit — run automated remediation
+  ansible.windows.win_shell: |
+    powershell.exe -ExecutionPolicy Bypass -NonInteractive -File C:\Windows\Temp\ad_remediate.ps1 `
+        -FixAsRepRoasting {{ ad_audit_fix_asrep | ternary('1', '0') }} `
+        -FixUnconstrainedDeleg {{ ad_audit_fix_unconstrained_delegation | ternary('1', '0') }} `
+        -FixPreWin2kGroup {{ ad_audit_fix_prewin2k | ternary('1', '0') }} `
+        -ClearShadowKeys {{ ad_audit_fix_shadow_creds | ternary('1', '0') }} `
+        -OutputPath "{{ ad_audit_remediate_log_remote_path }}"
+  register: ad_remediate_run
+  changed_when: "'REMEDIATION_DONE' in ad_remediate_run.stdout"
+  when: ad_audit_remediate
+
+- name: AD Audit — fetch remediation log to controller
+  ansible.builtin.fetch:
+    src: "{{ ad_audit_remediate_log_remote_path }}"
+    dest: "{{ ad_audit_report_local_dir }}/{{ inventory_hostname }}_ad_remediate_{{ ansible_date_time.date }}.txt"
+    flat: true
+  when:
+    - ad_audit_remediate
+    - ad_audit_fetch_report
+
+- name: AD Audit — display remediation output
+  ansible.builtin.debug:
+    var: ad_remediate_run.stdout_lines
+  when: ad_audit_remediate
+
+# ---------------------------------------------------------------------------
+# 5. Ansible-native remediations (items not covered by PS script)
+# ---------------------------------------------------------------------------
+
+# Disable accounts with password never expires in privileged groups
+# (report only — too dangerous to auto-disable without review)
+- name: AD Audit — check for accounts to disable (report only)
+  ansible.builtin.debug:
+    msg: >
+      Review the audit report for DISABLED privileged accounts and
+      stale accounts. Disable them manually if they are not needed.
+  when: not ad_audit_remediate

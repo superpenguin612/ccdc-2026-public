@@ -1,0 +1,38 @@
+---
+# Additional services to stop and disable beyond Print Spooler and Remote Registry
+windows_hardening_disable_services:
+  - SNMPTRAP         # SNMP Trap — unnecessary, can leak info
+  - SSDPSRV          # SSDP Discovery — UPnP discovery, attack surface
+  - upnphost         # UPnP Device Host — attack surface
+  - MSMQ             # Message Queuing — rarely needed, attack surface
+  - TapiSrv          # Telephony API — rarely needed
+  - Fax              # Fax service
+  - wbengine         # Windows Block Level Backup Engine
+  - WerSvc           # Windows Error Reporting — leaks info to Microsoft
+
+windows_hardening_disable_print_spooler: true
+windows_hardening_disable_remote_registry: true
+windows_hardening_disable_powershell_v2: true
+windows_hardening_disable_llmnr: true
+windows_hardening_disable_autorun: true
+windows_hardening_disable_wdigest: true
+windows_hardening_disable_lm_hash: true
+windows_hardening_restrict_anonymous: true
+windows_hardening_disable_insecure_guest_logons: true
+windows_hardening_require_smb_signing: true
+windows_hardening_disable_smb1: true
+windows_hardening_enforce_dc_netlogon_protection: true
+
+# Mimikatz / credential theft mitigations
+windows_hardening_enable_lsa_protection: true
+windows_hardening_enable_credential_guard: true
+windows_hardening_disable_ntlmv1: true
+windows_hardening_restrict_ntlm: true
+windows_hardening_limit_cached_logons: true
+windows_hardening_disable_wpad: true
+windows_hardening_disable_netbios: true
+windows_hardening_disable_mdns: true
+windows_hardening_restrict_remote_sam: true
+windows_hardening_disable_rdp: true
+windows_hardening_disable_wscript: true
+windows_hardening_enforce_uac: true

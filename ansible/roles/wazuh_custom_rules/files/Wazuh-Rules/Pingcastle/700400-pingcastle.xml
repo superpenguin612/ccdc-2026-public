@@ -1,0 +1,112 @@
+<group name="pingcastle,">
+
+  <!-- Base: any PingCastle JSON line from active-responses.log -->
+  <rule id="700400" level="3">
+    <decoded_as>json</decoded_as>
+    <field name="group">^PingCastle$</field>
+    <description>PingCastle event ingested</description>
+    <options>no_full_log</options>
+  </rule>
+
+  <!-- Step/progress events (status tracking) -->
+  <rule id="700401" level="3">
+    <if_sid>700400</if_sid>
+    <field name="step">\.+</field>
+    <description>PingCastle: script step - $(step) [$(status)]</description>
+    <options>no_full_log</options>
+  </rule>
+
+  <!-- Script error -->
+  <rule id="700402" level="10">
+    <if_sid>700400</if_sid>
+    <field name="result">^failure$</field>
+    <description>PingCastle: script execution failure - $(message)</description>
+  </rule>
+
+  <!-- Summary event -->
+  <rule id="700403" level="3">
+    <if_sid>700400</if_sid>
+    <field name="eventType">^summary$</field>
+    <description>PingCastle: domain health summary for $(domainFqdn) - Global Score: $(scores.global)</description>
+    <options>no_full_log</options>
+  </rule>
+
+  <!-- Base risk rule event (all findings) -->
+  <rule id="700404" level="5">
+    <if_sid>700400</if_sid>
+    <field name="eventType">^riskRule$</field>
+    <description>PingCastle: risk rule $(riskId) detected on $(domainFqdn) [$(points) pts, $(category)]</description>
+  </rule>
+
+</group>
+
+
+<group name="pingcastle,riskid,">
+
+  <rule id="700410" level="12">
+    <if_sid>700404</if_sid>
+    <field name="riskId">^A-DC-Spooler$</field>
+    <description>PingCastle: DC spooler remotely accessible (A-DC-Spooler) on $(domainFqdn)</description>
+  </rule>
+
+  <rule id="700411" level="10">
+    <if_sid>700404</if_sid>
+    <field name="riskId">^S-OldNtlm$</field>
+    <description>PingCastle: NTLMv1/LM permitted (S-OldNtlm) on $(domainFqdn)</description>
+  </rule>
+
+  <rule id="700412" level="6">
+    <if_sid>700404</if_sid>
+    <field name="riskId">^P-RecycleBin$</field>
+    <description>PingCastle: AD Recycle Bin not enabled (P-RecycleBin) on $(domainFqdn)</description>
+  </rule>
+
+  <rule id="700413" level="8">
+    <if_sid>700404</if_sid>
+    <field name="riskId">^P-AdminLogin$</field>
+    <description>PingCastle: Built-in Administrator used recently (P-AdminLogin) on $(domainFqdn)</description>
+  </rule>
+
+  <rule id="700414" level="9">
+    <if_sid>700404</if_sid>
+    <field name="riskId">^P-Delegated$</field>
+    <description>PingCastle: Privileged accounts can be delegated (P-Delegated) on $(domainFqdn)</description>
+  </rule>
+
+  <rule id="700415" level="8">
+    <if_sid>700404</if_sid>
+    <field name="riskId">^A-LAPS-Not-Installed$</field>
+    <description>PingCastle: LAPS not installed/detected (A-LAPS-Not-Installed) on $(domainFqdn)</description>
+  </rule>
+
+  <rule id="700416" level="5">
+    <if_sid>700404</if_sid>
+    <field name="riskId">^A-NotEnoughDC$</field>
+    <description>PingCastle: insufficient DC redundancy (A-NotEnoughDC) on $(domainFqdn)</description>
+  </rule>
+
+  <rule id="700417" level="7">
+    <if_sid>700404</if_sid>
+    <field name="riskId">^P-SchemaAdmin$</field>
+    <description>PingCastle: Schema Admins not empty (P-SchemaAdmin) on $(domainFqdn)</description>
+  </rule>
+
+  <rule id="700418" level="6">
+    <if_sid>700404</if_sid>
+    <field name="riskId">^S-ADRegistration$</field>
+    <description>PingCastle: MachineAccountQuota allows non-admin joins (S-ADRegistration) on $(domainFqdn)</description>
+  </rule>
+
+  <rule id="700419" level="6">
+    <if_sid>700404</if_sid>
+    <field name="riskId">^A-BackupMetadata$</field>
+    <description>PingCastle: AD backup appears stale/outdated (A-BackupMetadata) on $(domainFqdn)</description>
+  </rule>
+
+  <rule id="700420" level="6">
+    <if_sid>700404</if_sid>
+    <field name="riskId">^S-TerminalServicesGPO$</field>
+    <description>PingCastle: Terminal Services GPO misconfigured (S-TerminalServicesGPO) on $(domainFqdn)</description>
+  </rule>
+
+</group>

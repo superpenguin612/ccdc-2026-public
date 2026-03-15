@@ -1,0 +1,73 @@
+---
+# Allow this firewall's internal hosts to reach scored services on the other side's public net.
+# HTTP, HTTPS, and DNS are already allowed globally outbound — skip those here.
+
+- name: Outbound cross-side NTP (to remote public net)
+  paloaltonetworks.panos.panos_security_rule:
+    provider: "{{ panos_provider }}"
+    rule_name: "Outbound_CrossSide_NTP"
+    source_zone: ["internal"]
+    source_ip: ["Internal_Net"]
+    destination_zone: ["external"]
+    destination_ip: ["Remote_Pub_Net"]
+    application: "{{ app_type_mappings.fw_ntp.palo_apps }}"
+    service: "{{ app_type_mappings.fw_ntp.palo_service }}"
+    action: "allow"
+    log_setting: "{{ palo_log_setting }}"
+  when: groups['fw_ntp'] | default([]) | intersect(groups[hostvars[groups['firewalls'] | difference([inventory_hostname]) | first]['protected_group']] | default([])) | length > 0
+
+- name: Outbound cross-side FTP (to remote public net)
+  paloaltonetworks.panos.panos_security_rule:
+    provider: "{{ panos_provider }}"
+    rule_name: "Outbound_CrossSide_FTP"
+    source_zone: ["internal"]
+    source_ip: ["Internal_Net"]
+    destination_zone: ["external"]
+    destination_ip: ["Remote_Pub_Net"]
+    application: "{{ app_type_mappings.fw_ftp.palo_apps }}"
+    service: "{{ app_type_mappings.fw_ftp.palo_service }}"
+    action: "allow"
+    log_setting: "{{ palo_log_setting }}"
+  when: groups['fw_ftp'] | default([]) | intersect(groups[hostvars[groups['firewalls'] | difference([inventory_hostname]) | first]['protected_group']] | default([])) | length > 0
+
+- name: Outbound cross-side SMTP (to remote public net)
+  paloaltonetworks.panos.panos_security_rule:
+    provider: "{{ panos_provider }}"
+    rule_name: "Outbound_CrossSide_SMTP"
+    source_zone: ["internal"]
+    source_ip: ["Internal_Net"]
+    destination_zone: ["external"]
+    destination_ip: ["Remote_Pub_Net"]
+    application: "{{ app_type_mappings.fw_smtp.palo_apps }}"
+    service: "{{ app_type_mappings.fw_smtp.palo_service }}"
+    action: "allow"
+    log_setting: "{{ palo_log_setting }}"
+  when: groups['fw_smtp'] | default([]) | intersect(groups[hostvars[groups['firewalls'] | difference([inventory_hostname]) | first]['protected_group']] | default([])) | length > 0
+
+- name: Outbound cross-side POP3 (to remote public net)
+  paloaltonetworks.panos.panos_security_rule:
+    provider: "{{ panos_provider }}"
+    rule_name: "Outbound_CrossSide_POP3"
+    source_zone: ["internal"]
+    source_ip: ["Internal_Net"]
+    destination_zone: ["external"]
+    destination_ip: ["Remote_Pub_Net"]
+    application: "{{ app_type_mappings.fw_pop3.palo_apps }}"
+    service: "{{ app_type_mappings.fw_pop3.palo_service }}"
+    action: "allow"
+    log_setting: "{{ palo_log_setting }}"
+  when: groups['fw_pop3'] | default([]) | intersect(groups[hostvars[groups['firewalls'] | difference([inventory_hostname]) | first]['protected_group']] | default([])) | length > 0
+
+- name: Outbound cross-side Splunk forwarder (to remote public net)
+  paloaltonetworks.panos.panos_security_rule:
+    provider: "{{ panos_provider }}"
+    rule_name: "Outbound_CrossSide_Splunk"
+    source_zone: ["internal"]
+    source_ip: ["Internal_Net"]
+    destination_zone: ["external"]
+    destination_ip: ["Remote_Pub_Net"]
+    application: "{{ app_type_mappings.fw_splunk_web.palo_apps }}"
+    service: "{{ app_type_mappings.fw_splunk_web.palo_service }}"
+    action: "allow"
+    log_setting: "{{ palo_log_setting }}"
+  when: groups['fw_splunk'] | default([]) | intersect(groups[hostvars[groups['firewalls'] | difference([inventory_hostname]) | first]['protected_group']] | default([])) | length > 0

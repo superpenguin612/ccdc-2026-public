@@ -1,0 +1,23 @@
+---
+# Indexes to create — must match what forwarders send to
+splunk_indexes_list:
+  - linux
+  - windows
+  - web
+  - mail
+  - dns
+  - iis
+
+# Splunk install directory
+splunk_indexes_home: /opt/splunk
+
+# Max index size (MB) — keep small for competition
+splunk_indexes_max_size_mb: 5000
+
+# Frozen time (seconds) — how long before data is frozen/deleted
+# 86400 = 24 hours (more than enough for a 6h competition)
+splunk_indexes_frozen_secs: 86400
+
+# Auth credentials for CLI commands
+splunk_indexes_admin_user: admin
+splunk_indexes_admin_pass: "{{ vault_splunk_password | default('changeme') }}"

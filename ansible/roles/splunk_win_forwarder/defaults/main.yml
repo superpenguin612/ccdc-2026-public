@@ -1,0 +1,38 @@
+---
+# =============================================================================
+# Splunk Universal Forwarder for Windows
+# =============================================================================
+
+splunk_version: "10.0.2"
+splunk_build:   "e2d18b4767e9"
+
+# MSI filename — must be present at files/{{ installer_msi_name }}
+installer_msi_name: "splunkforwarder-{{ splunk_version }}-{{ splunk_build }}-windows-x64.msi"
+installer_dest: 'C:\Windows\Temp\splunkforwarder.msi'
+install_dir:    'C:\Program Files\SplunkUniversalForwarder'
+
+# Splunk indexer — use internal IP since Windows zone routes to Linux zone
+splunk_indexer_ip:   "{{ hostvars['splunk']['ip_internal'] }}"
+splunk_indexer_port: 9997
+
+# Forwarder admin credentials (set in vault)
+# vault_splunk_uf_password: "..."
+splunk_uf_user: admin
+splunk_uf_pass: "{{ vault_splunk_uf_password | default('changeme') }}"
+
+# Server name shown in Splunk — unique per host
+splunk_server_name: "CCDC-{{ inventory_hostname }}"
+
+# Default index for Windows events
+splunk_windows_index: "windows"
+splunk_iis_index:     "iis"
+splunk_dns_index:     "dns"
+
+# Technology Add-on archives — must be present at files/<name>
+# Download from splunkbase.splunk.com before competition
+splunk_ta_archives:
+  - "splunk-add-on-for-microsoft-windows_912.tgz"
+  - "splunk-add-on-for-sysmon_500.tgz"
+
+# IIS TA — deployed only on svc_iis and svc_iis_ftp hosts
+splunk_ta_iis_archive: "splunk-add-on-for-microsoft-iis_200.tgz"

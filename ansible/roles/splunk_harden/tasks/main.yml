@@ -1,0 +1,171 @@
+---
+# ---------------------------------------------------------------------------
+# Splunk hardening — protect monitoring infrastructure
+# Splunk web UI is a scored service and must remain accessible on port 8000
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# 0. Back up config files before touching anything
+# ---------------------------------------------------------------------------
+- name: Splunk — back up server.conf
+  ansible.builtin.copy:
+    src: /opt/splunk/etc/system/local/server.conf
+    dest: /opt/splunk/etc/system/local/server.conf.ccdc.bak
+    remote_src: true
+    force: false
+    mode: preserve
+  become: true
+  failed_when: false
+
+# ---------------------------------------------------------------------------
+# 1. Rotate Splunk admin password
+# ---------------------------------------------------------------------------
+- name: Splunk — rotate admin password
+  ansible.builtin.command: >
+    /opt/splunk/bin/splunk edit user admin
+    -password '{{ splunk_harden_admin_password }}'
+    -auth 'admin:{{ splunk_harden_current_password }}'
+  become: true
+  no_log: true
+  when: splunk_harden_rotate_password
+  failed_when: false  # may already be changed from default
+
+- name: Splunk — rotate admin password (retry with new password if default failed)
+  ansible.builtin.command: >
+    /opt/splunk/bin/splunk edit user admin
+    -password '{{ splunk_harden_admin_password }}'
+    -auth 'admin:{{ splunk_harden_admin_password }}'
+  become: true
+  no_log: true
+  when: splunk_harden_rotate_password
+  failed_when: false
+
+# ---------------------------------------------------------------------------
+# 3. Lock down Splunk config file permissions
+# ---------------------------------------------------------------------------
+- name: Splunk — restrict permissions on etc/system/local/ configs
+  ansible.builtin.file:
+    path: /opt/splunk/etc/system/local
+    owner: splunk
+    group: splunk
+    mode: "0750"
+    recurse: false
+  become: true
+  failed_when: false
+
+- name: Splunk — restrict permissions on passwd file
+  ansible.builtin.file:
+    path: /opt/splunk/etc/passwd
+    owner: splunk
+    group: splunk
+    mode: "0600"
+  become: true
+  failed_when: false
+
+# ---------------------------------------------------------------------------
+# 4. Lock down management port (8089) to localhost only
+# ---------------------------------------------------------------------------
+- name: Splunk — bind management port to localhost only
+  community.general.ini_file:
+    path: /opt/splunk/etc/system/local/server.conf
+    section: general
+    option: mgmtHostPort
+    value: "127.0.0.1:8089"
+    create: true
+    owner: splunk
+    group: splunk
+    mode: "0600"
+  become: true
+  notify: Restart splunk
+
+# ---------------------------------------------------------------------------
+# 5. Lock down MongoDB/kvstore to localhost
+# ---------------------------------------------------------------------------
+- name: Splunk — bind kvstore (MongoDB) to localhost
+  community.general.ini_file:
+    path: /opt/splunk/etc/system/local/server.conf
+    section: kvstore
+    option: bind_ip
+    value: "127.0.0.1"
+    create: true
+    owner: splunk
+    group: splunk
+    mode: "0600"
+  become: true
+  notify: Restart splunk
+
+# ---------------------------------------------------------------------------
+# 6. Enable forwarder receiver on 9997
+# ---------------------------------------------------------------------------
+- name: Splunk — enable forwarder receiver on port 9997
+  ansible.builtin.command: >
+    /opt/splunk/bin/splunk enable listen 9997
+    -auth '{{ splunk_harden_admin_user }}:{{ splunk_harden_admin_password }}'
+  become: true
+  become_user: splunk
+  no_log: true
+  changed_when: false
+  failed_when: false
+
+# ---------------------------------------------------------------------------
+# 7. Enable boot-start
+# ---------------------------------------------------------------------------
+- name: Splunk — check if boot-start is already enabled
+  ansible.builtin.stat:
+    path: /etc/init.d/splunk
+  register: _splunk_initd
+  become: true
+
+- name: Splunk — enable boot-start
+  ansible.builtin.command: /opt/splunk/bin/splunk enable boot-start -user splunk
+  become: true
+  when: not _splunk_initd.stat.exists
+  failed_when: false
+
+# ---------------------------------------------------------------------------
+# 8. Ensure splunk service is running
+# ---------------------------------------------------------------------------
+- name: Splunk — ensure service is started
+  ansible.builtin.service:
+    name: splunk
+    state: started
+    enabled: true
+  become: true
+  failed_when: false
+
+# ---------------------------------------------------------------------------
+# 9. Override Sysmon TA index routing (keep Sysmon events in 'windows' index)
+# ---------------------------------------------------------------------------
+- name: Splunk — check if Sysmon TA is installed
+  ansible.builtin.stat:
+    path: /opt/splunk/etc/apps/Splunk_TA_microsoft_sysmon
+  register: _sysmon_ta
+  become: true
+
+- name: Splunk — create Sysmon TA local/ directory
+  ansible.builtin.file:
+    path: /opt/splunk/etc/apps/Splunk_TA_microsoft_sysmon/local
+    state: directory
+    owner: splunk
+    group: splunk
+    mode: "0750"
+  become: true
+  when: _sysmon_ta.stat.exists
+
+- name: Splunk — override Sysmon TA transforms to keep events in windows index
+  ansible.builtin.copy:
+    dest: /opt/splunk/etc/apps/Splunk_TA_microsoft_sysmon/local/transforms.conf
+    owner: splunk
+    group: splunk
+    mode: "0640"
+    content: |
+      # Override: disable default index routing so Sysmon events
+      # stay in whatever index the forwarder specifies (windows).
+      # Default TA uses REGEX = . which matches everything and reroutes to index=sysmon.
+      [sysmon-eventtype-index]
+      REGEX = DISABLED_BY_CCDC_OVERRIDE
+      DEST_KEY = _MetaData:Index
+      FORMAT = sysmon
+  become: true
+  when: _sysmon_ta.stat.exists
+  notify: Restart splunk

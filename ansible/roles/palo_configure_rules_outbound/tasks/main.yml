@@ -1,0 +1,12 @@
+---
+- include_tasks: icmp.yml
+- include_tasks: ssh_ansible.yml
+- include_tasks: splunk_out.yml
+- include_tasks: wazuh_out.yml
+- include_tasks: dns.yml
+- include_tasks: http.yml
+- include_tasks: https.yml
+- include_tasks: ntp.yml
+- include_tasks: ptp.yml
+- include_tasks: cross_side_scored.yml
+- include_tasks: default_deny_out.yml

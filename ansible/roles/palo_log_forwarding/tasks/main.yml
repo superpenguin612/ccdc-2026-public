@@ -1,0 +1,62 @@
+---
+# ---------------------------------------------------------------------------
+# 1. Syslog server — points to the Wazuh server
+# ---------------------------------------------------------------------------
+- name: Palo — create Wazuh syslog server
+  paloaltonetworks.panos.panos_syslog_server:
+    provider: "{{ panos_provider }}"
+    syslog_profile: "{{ palo_log_syslog_profile_name }}"
+    name: wazuh
+    server: "{{ palo_log_wazuh_ip }}"
+    transport: "{{ palo_log_syslog_transport }}"
+    port: "{{ palo_log_syslog_port }}"
+    format: "{{ palo_log_syslog_format }}"
+    facility: "{{ palo_log_syslog_facility }}"
+
+# ---------------------------------------------------------------------------
+# 2. Log forwarding profile
+# ---------------------------------------------------------------------------
+- name: Palo — create CCDC log forwarding profile
+  paloaltonetworks.panos.panos_log_forwarding_profile:
+    provider: "{{ panos_provider }}"
+    name: "{{ palo_log_forwarding_profile_name }}"
+    description: "Forward traffic and threat logs to Wazuh"
+
+# ---------------------------------------------------------------------------
+# 3. Match list — traffic logs (all allowed/denied connections)
+# ---------------------------------------------------------------------------
+- name: Palo — add traffic log match list to forwarding profile
+  paloaltonetworks.panos.panos_log_forwarding_profile_match_list:
+    provider: "{{ panos_provider }}"
+    log_forwarding_profile: "{{ palo_log_forwarding_profile_name }}"
+    name: "all-traffic"
+    log_type: traffic
+    filter: "All Logs"
+    syslog_profiles:
+      - "{{ palo_log_syslog_profile_name }}"
+
+# ---------------------------------------------------------------------------
+# 4. Match list — threat logs (IPS/IDS hits, malware, exploits)
+# ---------------------------------------------------------------------------
+- name: Palo — add threat log match list to forwarding profile
+  paloaltonetworks.panos.panos_log_forwarding_profile_match_list:
+    provider: "{{ panos_provider }}"
+    log_forwarding_profile: "{{ palo_log_forwarding_profile_name }}"
+    name: "all-threats"
+    log_type: threat
+    filter: "All Logs"
+    syslog_profiles:
+      - "{{ palo_log_syslog_profile_name }}"
+
+# ---------------------------------------------------------------------------
+# 5. Match list — wildfire/malware submission logs
+# ---------------------------------------------------------------------------
+- name: Palo — add wildfire log match list to forwarding profile
+  paloaltonetworks.panos.panos_log_forwarding_profile_match_list:
+    provider: "{{ panos_provider }}"
+    log_forwarding_profile: "{{ palo_log_forwarding_profile_name }}"
+    name: "all-wildfire"
+    log_type: wildfire
+    filter: "All Logs"
+    syslog_profiles:
+      - "{{ palo_log_syslog_profile_name }}"

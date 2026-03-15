@@ -1,0 +1,227 @@
+---
+# ---------------------------------------------------------------------------
+# 0. Back up config files before touching anything
+# ---------------------------------------------------------------------------
+- name: Apache — back up config files
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "{{ item }}.ccdc.bak"
+    remote_src: true
+    force: false
+    mode: preserve
+  become: true
+  failed_when: false
+  loop:
+    - /etc/apache2/apache2.conf
+    - /etc/apache2/conf-available/security.conf
+    - /etc/apache2/envvars
+    - /etc/apache2/mods-enabled/security2.conf
+    - /etc/modsecurity/modsecurity.conf
+
+# --- ModSecurity WAF ---
+- name: Install ModSecurity and OWASP CRS
+  ansible.builtin.apt:
+    name:
+      - libapache2-mod-security2
+      - modsecurity-crs
+    state: present
+    update_cache: true
+  become: true
+  notify: Restart apache2
+
+- name: Enable ModSecurity module
+  community.general.apache2_module:
+    name: security2
+    state: present
+  become: true
+  notify: Restart apache2
+
+- name: Deploy ModSecurity recommended config
+  ansible.builtin.copy:
+    src: /etc/modsecurity/modsecurity.conf-recommended
+    dest: /etc/modsecurity/modsecurity.conf
+    remote_src: true
+    force: false
+  become: true
+  notify: Restart apache2
+
+- name: Set ModSecurity to enforcement mode (On)
+  ansible.builtin.lineinfile:
+    path: /etc/modsecurity/modsecurity.conf
+    regexp: '^SecRuleEngine'
+    line: 'SecRuleEngine On'
+  become: true
+  notify: Restart apache2
+
+- name: Enable OWASP CRS setup config
+  ansible.builtin.copy:
+    src: /usr/share/modsecurity-crs/crs-setup.conf.example
+    dest: /usr/share/modsecurity-crs/crs-setup.conf
+    remote_src: true
+    force: false
+  become: true
+  notify: Restart apache2
+
+- name: Include OWASP CRS in ModSecurity config
+  ansible.builtin.blockinfile:
+    path: /etc/apache2/mods-enabled/security2.conf
+    marker: "# {mark} ANSIBLE MANAGED - CRS include"
+    block: |
+      IncludeOptional /usr/share/modsecurity-crs/crs-setup.conf
+      IncludeOptional /usr/share/modsecurity-crs/rules/*.conf
+  become: true
+  notify: Restart apache2
+
+- name: Disable server version info (ServerTokens)
+  ansible.builtin.lineinfile:
+    path: /etc/apache2/conf-available/security.conf
+    regexp: '^ServerTokens'
+    line: 'ServerTokens Prod'
+  become: true
+  notify: Restart apache2
+
+- name: Disable server signature (ServerSignature)
+  ansible.builtin.lineinfile:
+    path: /etc/apache2/conf-available/security.conf
+    regexp: '^ServerSignature'
+    line: 'ServerSignature Off'
+  become: true
+  notify: Restart apache2
+
+- name: Disable TRACE method
+  ansible.builtin.lineinfile:
+    path: /etc/apache2/conf-available/security.conf
+    regexp: '^TraceEnable'
+    line: 'TraceEnable Off'
+  become: true
+  notify: Restart apache2
+
+- name: Disable directory listing globally
+  ansible.builtin.blockinfile:
+    path: /etc/apache2/conf-available/security.conf
+    marker: "# {mark} ANSIBLE MANAGED - directory listing"
+    block: |
+      <Directory />
+          Options -Indexes -Includes -ExecCGI
+          AllowOverride None
+          Require all denied
+      </Directory>
+  become: true
+  notify: Restart apache2
+
+- name: Set security headers
+  ansible.builtin.blockinfile:
+    path: /etc/apache2/conf-available/security.conf
+    marker: "# {mark} ANSIBLE MANAGED - security headers"
+    block: |
+      Header always set X-Frame-Options "SAMEORIGIN"
+      Header always set X-Content-Type-Options "nosniff"
+      Header always set X-XSS-Protection "1; mode=block"
+      Header always set Referrer-Policy "strict-origin-when-cross-origin"
+      Header always set Permissions-Policy "geolocation=(), microphone=(), camera=()"
+      Header always unset X-Powered-By
+      Header always unset Server
+  become: true
+  notify: Restart apache2
+
+- name: Enable security.conf
+  ansible.builtin.command: a2enconf security
+  args:
+    creates: /etc/apache2/conf-enabled/security.conf
+  become: true
+  notify: Restart apache2
+
+- name: Enable headers module
+  community.general.apache2_module:
+    name: headers
+    state: present
+  become: true
+  notify: Restart apache2
+
+- name: Disable unused modules
+  community.general.apache2_module:
+    name: "{{ item }}"
+    state: absent
+    force: true
+  loop:
+    - autoindex
+    - status
+    - info
+    - cgi
+    - cgid
+    - userdir
+  become: true
+  notify: Restart apache2
+
+- name: Restrict HTTP methods in default vhost config
+  ansible.builtin.blockinfile:
+    path: /etc/apache2/conf-available/security.conf
+    marker: "# {mark} ANSIBLE MANAGED - method restriction"
+    block: |
+      <LimitExcept GET POST HEAD>
+          Require all denied
+      </LimitExcept>
+  become: true
+  notify: Restart apache2
+
+- name: Set request size limits
+  ansible.builtin.blockinfile:
+    path: /etc/apache2/conf-available/security.conf
+    marker: "# {mark} ANSIBLE MANAGED - request limits"
+    block: |
+      LimitRequestBody 10485760
+      LimitRequestFields 40
+      LimitRequestFieldSize 8190
+      LimitRequestLine 8190
+      Timeout 60
+      KeepAliveTimeout 5
+      MaxKeepAliveRequests 100
+  become: true
+  notify: Restart apache2
+
+- name: Enable mod_evasive if available (basic DoS protection)
+  community.general.apache2_module:
+    name: evasive
+    state: present
+  become: true
+  ignore_errors: true
+  notify: Restart apache2
+
+# AllowOverride is left at its default (None at /) — per-app roles like
+# opencart_harden deploy specific .htaccess files for upload dir restrictions
+# and clean URL rewrites, which require AllowOverride to be set on their vhost.
+# Setting AllowOverride None on /var/www/ would silently break those protections.
+
+- name: Ensure Apache runs as www-data
+  ansible.builtin.lineinfile:
+    path: /etc/apache2/envvars
+    regexp: '^export APACHE_RUN_USER='
+    line: 'export APACHE_RUN_USER=www-data'
+  become: true
+  notify: Restart apache2
+
+- name: Ensure Apache group is www-data
+  ansible.builtin.lineinfile:
+    path: /etc/apache2/envvars
+    regexp: '^export APACHE_RUN_GROUP='
+    line: 'export APACHE_RUN_GROUP=www-data'
+  become: true
+  notify: Restart apache2
+
+- name: Restrict access to Apache config files
+  ansible.builtin.file:
+    path: "{{ item }}"
+    owner: root
+    group: root
+    mode: '0640'
+  loop:
+    - /etc/apache2/apache2.conf
+    - /etc/apache2/conf-available/security.conf
+  become: true
+
+- name: Ensure Apache is enabled and running
+  ansible.builtin.service:
+    name: apache2
+    state: started
+    enabled: true
+  become: true

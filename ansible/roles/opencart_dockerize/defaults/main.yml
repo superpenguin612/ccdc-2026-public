@@ -1,0 +1,29 @@
+---
+# Where the finished image tar lands on the controller
+opencart_docker_output_dir: "{{ playbook_dir }}/../backups/opencart_docker"
+
+# Tag burned into the image
+opencart_docker_image_tag: "ccdc26/opencart:latest"
+
+# Container name when run
+opencart_docker_container_name: opencart
+
+# Port the container exposes on the host (host:container)
+# NOTE: Docker bypasses UFW by default (inserts its own iptables rules).
+# Port 80 must still be open in UFW (fw_http group handles this) but Docker
+# will punch through regardless. This is intentional — the container IS the
+# web server; host Apache is stopped.
+opencart_docker_host_port: 80
+opencart_docker_container_port: 80
+
+# MySQL root password inside the container (vault-backed)
+# Set in host_vars: opencart_docker_mysql_root_password: "{{ vault_mysql_root_password }}"
+opencart_docker_mysql_root_password: "{{ vault_mysql_root_password | default('changeme') }}"
+
+# OpenCart DB credentials inside the container (keep same as live so config.php works)
+opencart_docker_db_user: "{{ opencart_db_user | default('opencart') }}"
+opencart_docker_db_name: "{{ opencart_db_name | default('opencart') }}"
+opencart_docker_db_password: "{{ opencart_db_password | default(vault_opencart_db_password) }}"
+
+# Working scratch dir on the remote host
+opencart_docker_staging_dir: /tmp/ccdc26_oc_docker

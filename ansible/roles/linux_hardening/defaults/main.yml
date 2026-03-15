@@ -1,0 +1,83 @@
+---
+linux_hardening_disable_services:
+  - rpcbind
+  - avahi-daemon
+  - cups
+  - cups-browsed
+  - bluetooth
+  - bluez
+  - telnet
+  - vsftpd
+  - xinetd
+  - inetd
+  - nfs-server
+  - nfs-kernel-server
+  - rsh.socket
+  - rlogin.socket
+  - rexec.socket
+  - rsh-server
+  - snmpd
+  - cockpit
+  - cockpit.socket
+  - startup_check
+
+linux_hardening_cron_allowed_users:
+  - root
+  - "{{ vault_new_credentials[inventory_hostname].user }}"
+
+linux_hardening_disable_ctrl_alt_del: true
+linux_hardening_disable_core_dumps: true
+linux_hardening_restrict_su: true
+linux_hardening_restrict_cron: true
+linux_hardening_harden_shared_memory: true
+linux_hardening_sysctl: true
+linux_hardening_uid0_audit: true
+linux_hardening_empty_password_audit: true
+linux_hardening_service_account_audit: true
+linux_hardening_sudo_hardening: true
+linux_hardening_module_blacklist: true
+linux_hardening_nproc_limits: true
+linux_hardening_home_permissions: true
+linux_hardening_world_writable: true
+linux_hardening_remove_suid: true
+linux_hardening_restrict_compilers: true
+linux_hardening_lock_system_accounts: true
+linux_hardening_ssh_banner: true
+linux_hardening_immutable_files: true
+linux_hardening_tmp_noexec: true
+linux_hardening_hidepid: true
+linux_hardening_disable_ipv6: true
+linux_hardening_disable_usb_storage: true
+linux_hardening_kill_sessions: true
+
+linux_hardening_suid_known_good:
+  - /usr/bin/sudo
+  - /usr/bin/su
+  - /usr/bin/passwd
+  - /usr/bin/chfn
+  - /usr/bin/chsh
+  - /usr/bin/newgrp
+  - /usr/bin/gpasswd
+  - /usr/bin/mount
+  - /usr/bin/umount
+  - /usr/bin/fusermount
+  - /usr/bin/fusermount3
+  - /usr/bin/pkexec
+  - /usr/bin/crontab
+  - /usr/bin/at
+  - /usr/bin/ssh-agent
+  - /usr/bin/wall
+  - /usr/bin/write
+  - /usr/bin/expiry
+  - /usr/lib/dbus-1.0/dbus-daemon-launch-helper
+  - /usr/lib/openssh/ssh-keysign
+  - /usr/lib/policykit-1/polkit-agent-helper-1
+  - /usr/libexec/polkit-agent-helper-1
+  - /usr/sbin/unix_chkpwd
+  - /usr/sbin/pam_timestamp_check
+
+linux_hardening_suid_remove_list:
+  - /usr/bin/wall
+  - /usr/bin/write
+  - /usr/bin/chage
+  - /usr/bin/expiry

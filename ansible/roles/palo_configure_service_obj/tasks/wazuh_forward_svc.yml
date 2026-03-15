@@ -1,0 +1,8 @@
+---
+- name: Create Wazuh forwarder port
+  paloaltonetworks.panos.panos_service_object:
+    provider: "{{ panos_provider }}"
+    name: "{{ app_type_mappings.fw_wazuh_forwarder.palo_service[0] }}"
+    protocol: "tcp"
+    destination_port: "{{ app_type_mappings.fw_wazuh_forwarder.ports[0] }}"
+  when: groups['fw_wazuh'] | default([]) | length > 0

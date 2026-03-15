@@ -1,0 +1,24 @@
+---
+- name: Set up palo-alto2 tunnel
+  hosts: ubuntu-wkst
+  roles:
+    - palo2_ssh_tunnel
+
+- name: Gather security rules
+  hosts: firewalls
+
+  collections:
+    - paloaltonetworks.panos
+
+  tasks:
+    - name: Get all security rules
+      paloaltonetworks.panos.panos_security_rule:
+        provider: "{{ panos_provider }}"
+        gathered_filter: "*"
+        state: gathered
+      register: sec_rules
+
+    - name: Output
+      ansible.builtin.debug:
+        msg: "{{ sec_rules }}"
+

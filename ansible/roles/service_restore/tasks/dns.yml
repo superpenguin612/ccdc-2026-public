@@ -1,0 +1,30 @@
+---
+- name: DNS — extract zone files from local backup to export directory
+  ansible.windows.win_shell: |
+    if (Test-Path "{{ svc_dns_export_dir }}") {
+      Remove-Item "{{ svc_dns_export_dir }}\*" -Force -ErrorAction SilentlyContinue
+    }
+    Expand-Archive -Path "{{ win_backup_root }}\dns\dns_zones.zip" -DestinationPath "{{ svc_dns_export_dir }}" -Force
+
+- name: DNS — re-import each exported zone
+  ansible.windows.win_shell: |
+    $exportDir = "{{ svc_dns_export_dir }}"
+    $dnsDir = "C:\Windows\System32\dns"
+    $zones = Get-ChildItem "$exportDir\backup_*.dns"
+
+    foreach ($zoneFile in $zones) {
+      # Derive zone name from filename (backup_<zonename>.dns)
+      $zoneName = $zoneFile.BaseName -replace '^backup_', ''
+
+      # Copy the zone file to the DNS directory where dnscmd expects it
+      Copy-Item $zoneFile.FullName "$dnsDir\$($zoneFile.Name)" -Force
+
+      # If zone exists, reload from file; if not, add as primary zone
+      $existing = Get-DnsServerZone -Name $zoneName -ErrorAction SilentlyContinue
+      if ($existing) {
+        dnscmd /ZoneReload $zoneName
+      } else {
+        dnscmd /ZoneAdd $zoneName /Primary /file $zoneFile.Name /load
+      }
+    }
+    Write-Output "restored $($zones.Count) zones"

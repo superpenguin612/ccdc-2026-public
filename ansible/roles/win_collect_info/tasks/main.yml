@@ -1,0 +1,207 @@
+---
+- name: Create output directory on controller
+  delegate_to: localhost
+  ansible.builtin.file:
+    path: "{{ collect_output_dir }}"
+    state: directory
+    mode: '0700'
+
+# --- Users & Groups ---
+- name: Collect local users
+  ansible.windows.win_shell: Get-LocalUser | Select-Object Name,Enabled,PasswordExpires,LastLogon,Description | Format-List
+  register: local_users
+  changed_when: false
+  failed_when: false
+
+- name: Save local users to controller
+  delegate_to: localhost
+  ansible.builtin.copy:
+    content: "{{ local_users.stdout }}"
+    dest: "{{ collect_output_dir }}/local_users.txt"
+
+- name: Collect local groups and members
+  ansible.windows.win_shell: |
+    Get-LocalGroup | ForEach-Object {
+      $group = $_
+      Write-Output "=== $($group.Name) ==="
+      Get-LocalGroupMember -Group $group.Name -ErrorAction SilentlyContinue | Select-Object Name,PrincipalSource | Format-Table -AutoSize
+    }
+  register: local_groups
+  changed_when: false
+  failed_when: false
+
+- name: Save local groups to controller
+  delegate_to: localhost
+  ansible.builtin.copy:
+    content: "{{ local_groups.stdout }}"
+    dest: "{{ collect_output_dir }}/local_groups.txt"
+
+# --- Installed Software ---
+- name: Collect installed software
+  ansible.windows.win_shell: |
+    Get-ItemProperty HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*,
+      HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\* |
+      Select-Object DisplayName,DisplayVersion,Publisher,InstallDate |
+      Where-Object { $_.DisplayName } |
+      Sort-Object DisplayName |
+      Format-Table -AutoSize
+  register: installed_software
+  changed_when: false
+  failed_when: false
+
+- name: Save installed software to controller
+  delegate_to: localhost
+  ansible.builtin.copy:
+    content: "{{ installed_software.stdout }}"
+    dest: "{{ collect_output_dir }}/installed_software.txt"
+
+# --- Services ---
+- name: Collect all services
+  ansible.windows.win_shell: Get-Service | Select-Object Name,DisplayName,Status,StartType | Sort-Object StartType,Status | Format-Table -AutoSize
+  register: services
+  changed_when: false
+  failed_when: false
+
+- name: Save services to controller
+  delegate_to: localhost
+  ansible.builtin.copy:
+    content: "{{ services.stdout }}"
+    dest: "{{ collect_output_dir }}/services.txt"
+
+# --- Network ---
+- name: Collect network config
+  ansible.windows.win_shell: ipconfig /all
+  register: ipconfig
+  changed_when: false
+  failed_when: false
+
+- name: Save network config to controller
+  delegate_to: localhost
+  ansible.builtin.copy:
+    content: "{{ ipconfig.stdout }}"
+    dest: "{{ collect_output_dir }}/ipconfig.txt"
+
+- name: Collect listening ports
+  ansible.windows.win_shell: netstat -ano
+  register: netstat
+  changed_when: false
+  failed_when: false
+
+- name: Save listening ports to controller
+  delegate_to: localhost
+  ansible.builtin.copy:
+    content: "{{ netstat.stdout }}"
+    dest: "{{ collect_output_dir }}/netstat.txt"
+
+- name: Collect hosts file
+  ansible.builtin.fetch:
+    src: 'C:\Windows\System32\drivers\etc\hosts'
+    dest: "{{ collect_output_dir }}/hosts"
+    flat: true
+
+# --- Firewall ---
+- name: Collect firewall rules
+  ansible.windows.win_shell: Get-NetFirewallRule | Where-Object Enabled -eq True | Select-Object DisplayName,Direction,Action,Profile | Format-Table -AutoSize
+  register: fw_rules
+  changed_when: false
+  failed_when: false
+
+- name: Save firewall rules to controller
+  delegate_to: localhost
+  ansible.builtin.copy:
+    content: "{{ fw_rules.stdout }}"
+    dest: "{{ collect_output_dir }}/firewall_rules.txt"
+
+# --- Scheduled Tasks ---
+- name: Collect scheduled tasks
+  ansible.windows.win_shell: Get-ScheduledTask | Select-Object TaskName,TaskPath,State | Format-Table -AutoSize
+  register: sched_tasks
+  changed_when: false
+  failed_when: false
+
+- name: Save scheduled tasks to controller
+  delegate_to: localhost
+  ansible.builtin.copy:
+    content: "{{ sched_tasks.stdout }}"
+    dest: "{{ collect_output_dir }}/scheduled_tasks.txt"
+
+# --- Startup / Persistence ---
+- name: Collect registry run keys
+  ansible.windows.win_shell: |
+    Write-Output "=== HKLM Run ==="
+    Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run" -ErrorAction SilentlyContinue
+    Write-Output "=== HKCU Run ==="
+    Get-ItemProperty "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run" -ErrorAction SilentlyContinue
+    Write-Output "=== HKLM RunOnce ==="
+    Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce" -ErrorAction SilentlyContinue
+    Write-Output "=== HKCU RunOnce ==="
+    Get-ItemProperty "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce" -ErrorAction SilentlyContinue
+  register: run_keys
+  changed_when: false
+  failed_when: false
+
+- name: Save run keys to controller
+  delegate_to: localhost
+  ansible.builtin.copy:
+    content: "{{ run_keys.stdout }}"
+    dest: "{{ collect_output_dir }}/registry_run_keys.txt"
+
+# --- Processes ---
+- name: Collect running processes
+  ansible.windows.win_shell: Get-Process | Select-Object Name,Id,Path,CPU | Sort-Object Name | Format-Table -AutoSize
+  register: processes
+  changed_when: false
+  failed_when: false
+
+- name: Save running processes to controller
+  delegate_to: localhost
+  ansible.builtin.copy:
+    content: "{{ processes.stdout }}"
+    dest: "{{ collect_output_dir }}/processes.txt"
+
+# --- Audit Policy ---
+- name: Collect current audit policy
+  ansible.windows.win_shell: auditpol /get /category:* 
+  register: auditpol
+  changed_when: false
+  failed_when: false
+
+- name: Save audit policy to controller
+  delegate_to: localhost
+  ansible.builtin.copy:
+    content: "{{ auditpol.stdout }}"
+    dest: "{{ collect_output_dir }}/auditpol.txt"
+
+# --- PowerShell Logging ---
+- name: Collect PowerShell logging settings
+  ansible.windows.win_shell: |
+    Write-Output "=== Module Logging ==="
+    Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ModuleLogging" -ErrorAction SilentlyContinue
+    Write-Output "=== Script Block Logging ==="
+    Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging" -ErrorAction SilentlyContinue
+    Write-Output "=== Transcription ==="
+    Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\Transcription" -ErrorAction SilentlyContinue
+  register: ps_logging
+  changed_when: false
+  failed_when: false
+
+- name: Save PowerShell logging settings to controller
+  delegate_to: localhost
+  ansible.builtin.copy:
+    content: "{{ ps_logging.stdout }}"
+    dest: "{{ collect_output_dir }}/ps_logging.txt"
+
+# --- RDP ---
+- name: Collect RDP settings
+  ansible.windows.win_shell: |
+    Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server" |
+      Select-Object fDenyTSConnections, fSingleSessionPerUser | Format-List
+  register: rdp
+  changed_when: false
+  failed_when: false
+
+- name: Save RDP settings to controller
+  delegate_to: localhost
+  ansible.builtin.copy:
+    content: "{{ rdp.stdout }}"
+    dest: "{{ collect_output_dir }}/rdp_settings.txt"

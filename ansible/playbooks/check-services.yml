@@ -1,0 +1,68 @@
+---
+
+- name: Ensure scored services are running on Linux hosts
+  hosts: linux
+  gather_facts: no
+  become: yes
+
+  tasks:
+    - name: No services defined - skipping
+      ansible.builtin.debug:
+        msg: "{{ inventory_hostname }}: no host_services defined, skipping."
+      when: host_services | default([]) | length == 0
+
+    - name: Ensure service is started and enabled
+      ansible.builtin.service:
+        name: "{{ item }}"
+        state: started
+        enabled: yes
+      loop: "{{ host_services | default([]) }}"
+      when: host_services | default([]) | length > 0
+
+    - name: Gather service facts for status report
+      ansible.builtin.service_facts:
+      when: host_services | default([]) | length > 0
+
+    - name: Report service status
+      ansible.builtin.debug:
+        msg: >-
+          {{ item }}: {{
+            ansible_facts.services.get(item + '.service', {}).get('state', 'unknown')
+          }}
+      loop: "{{ host_services | default([]) }}"
+      when: host_services | default([]) | length > 0
+
+
+- name: Ensure scored services are running on Windows hosts
+  hosts: windows
+  gather_facts: no
+
+  tasks:
+    - name: No services defined - skipping
+      ansible.builtin.debug:
+        msg: "{{ inventory_hostname }}: no host_services defined, skipping."
+      when: host_services | default([]) | length == 0
+
+    - name: Ensure service is running and set to auto-start
+      ansible.windows.win_service:
+        name: "{{ windows_service_name_map[item] | default(item) }}"
+        state: started
+        start_mode: auto
+      loop: "{{ host_services | default([]) }}"
+      when: host_services | default([]) | length > 0
+
+    - name: Gather service info for status report
+      ansible.windows.win_service_info:
+        name: "{{ windows_service_name_map[item] | default(item) }}"
+      register: _svc_info
+      loop: "{{ host_services | default([]) }}"
+      when: host_services | default([]) | length > 0
+
+    - name: Report service status
+      ansible.builtin.debug:
+        msg: >-
+          {{ item.item }}: {{ item.services[0].state | default('not found') }}
+      loop: "{{ _svc_info.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when: host_services | default([]) | length > 0

@@ -1,0 +1,85 @@
+---
+# =============================================================================
+# service_verify defaults
+# Tests run from cross-platform workstations to simulate scoring checks.
+# win11-wkst  → tests Linux-side services (HTTP, SMTP, POP3, Splunk)
+# ubuntu-wkst → tests Windows-side services (IIS HTTP, FTP, DNS)
+#
+# Set svc_verify_<service>_enabled: false to skip a test entirely.
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# ubuntu-ecom — HTTP (Apache2 / OpenCart)
+# Tested from: win11-wkst
+# ---------------------------------------------------------------------------
+svc_verify_ecom_http_enabled: true
+svc_verify_ecom_http_host: "{{ hostvars['ubuntu-ecom']['ip_external'] }}"
+svc_verify_ecom_http_port: 80
+svc_verify_ecom_http_path: "/"
+svc_verify_ecom_http_expected_status: 200   # any 2xx also accepted
+svc_verify_ecom_http_timeout_sec: 10
+
+# ---------------------------------------------------------------------------
+# fedora-webmail — SMTP (Postfix)
+# Tested from: win11-wkst
+# Check: TCP connect succeeds and server returns a 220 banner
+# ---------------------------------------------------------------------------
+svc_verify_smtp_enabled: true
+svc_verify_smtp_host: "{{ hostvars['fedora-webmail']['ip_external'] }}"
+svc_verify_smtp_port: 25
+svc_verify_smtp_timeout_sec: 10
+
+# ---------------------------------------------------------------------------
+# fedora-webmail — POP3 (Dovecot)
+# Tested from: win11-wkst
+# Check: TCP connect succeeds and server returns a +OK banner
+# ---------------------------------------------------------------------------
+svc_verify_pop3_enabled: true
+svc_verify_pop3_host: "{{ hostvars['fedora-webmail']['ip_external'] }}"
+svc_verify_pop3_port: 110
+svc_verify_pop3_timeout_sec: 10
+
+# ---------------------------------------------------------------------------
+# splunk — Splunk Web UI (HTTP)
+# Tested from: win11-wkst
+# Check: HTTP GET returns any non-5xx response
+# ---------------------------------------------------------------------------
+svc_verify_splunk_enabled: true
+svc_verify_splunk_host: "{{ hostvars['splunk']['ip_external'] }}"
+svc_verify_splunk_port: 8000
+svc_verify_splunk_path: "/"
+svc_verify_splunk_timeout_sec: 15
+
+# ---------------------------------------------------------------------------
+# server-web — IIS HTTP
+# Tested from: ubuntu-wkst
+# ---------------------------------------------------------------------------
+svc_verify_iis_http_enabled: true
+svc_verify_iis_http_host: "{{ hostvars['server-web']['ip_external'] }}"
+svc_verify_iis_http_port: 80
+svc_verify_iis_http_path: "/"
+svc_verify_iis_http_expected_status: 200
+svc_verify_iis_http_timeout_sec: 10
+
+# ---------------------------------------------------------------------------
+# server-ftp — IIS FTP
+# Tested from: ubuntu-wkst
+# FTP test credentials are in default_passwords.yml (non-secret, given at competition)
+# ---------------------------------------------------------------------------
+svc_verify_ftp_enabled: true
+svc_verify_ftp_host: "{{ hostvars['server-ftp']['ip_external'] }}"
+svc_verify_ftp_port: 21
+svc_verify_ftp_user: "{{ ftp_test_user }}"
+svc_verify_ftp_password: "{{ ftp_test_password }}"
+svc_verify_ftp_timeout_sec: 10
+
+# ---------------------------------------------------------------------------
+# server-ad-dns — DNS
+# Tested from: ubuntu-wkst
+# Check: can resolve a known hostname against the DNS server
+# ---------------------------------------------------------------------------
+svc_verify_dns_enabled: true
+svc_verify_dns_host: "{{ hostvars['server-ad-dns']['ip_external'] }}"
+svc_verify_dns_port: 53
+svc_verify_dns_test_record: "google.com"   # record to resolve — confirms forwarding works
+svc_verify_dns_timeout_sec: 5

@@ -1,0 +1,18 @@
+---
+# Directories to create git checkpoints in.
+# Each entry:
+#   path: directory to init/commit
+#   gitignore: list of patterns to add to .gitignore (optional)
+linux_git_checkpoint_dirs:
+  - path: /etc
+    gitignore:
+      - ssl/private/
+
+# Additional dirs added only when they exist on the host.
+# (e.g. /var/www only on ubuntu-ecom)
+linux_git_checkpoint_extra_dirs:
+  - /var/www
+
+# Git identity used for commits
+linux_git_checkpoint_name: "ccdc"
+linux_git_checkpoint_email: "ccdc@localhost"

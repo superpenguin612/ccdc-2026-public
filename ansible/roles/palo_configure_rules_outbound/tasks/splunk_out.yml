@@ -1,0 +1,19 @@
+---
+- name: Allow Outbound Splunk Communication
+  paloaltonetworks.panos.panos_security_rule:
+    provider: "{{ panos_provider }}"
+    rule_name: "Outbound_SplunkAgent"
+    source_zone: ["internal"]
+    source_ip: ["Internal_Net"]
+    destination_zone: ["external"]
+    destination_ip: "{{ groups['svc_splunk'] | map('extract', hostvars, 'ip_external') | list }}"
+    application: "{{ app_type_mappings.fw_splunk_forwarder.palo_apps }}"
+    service: "{{ app_type_mappings.fw_splunk_forwarder.palo_service }}"
+    action: "allow"
+    log_setting: "{{ palo_log_setting }}"
+  when: # only on the firewall that does NOT protect the splunk server
+    - groups['svc_splunk'] | default([]) | length > 0
+    - groups['svc_splunk'] | intersect(groups[protected_group] | default([])) | length == 0
+
+
+

@@ -1,0 +1,12 @@
+---
+# Export information and back up service data from Windows hosts.
+# Run early — captures baseline before hardening changes things.
+#
+# Usage:
+#   ansible-playbook playbooks/windows/001-export-config.yml
+
+- name: Export information from Windows hosts
+  hosts: windows
+  roles:
+    - service_backup
+    - win_collect_info

@@ -1,0 +1,242 @@
+---
+# ---------------------------------------------------------------------------
+# 1. Detect PHP-FPM ini path and service name dynamically
+# ---------------------------------------------------------------------------
+- name: PHP — find FPM php.ini (highest installed version)
+  ansible.builtin.shell: |
+    find /etc/php -name php.ini -path "*/fpm/*" 2>/dev/null | sort -V | tail -1
+  register: _php_fpm_ini
+  changed_when: false
+  become: true
+
+- name: PHP — find FPM service name
+  ansible.builtin.shell: |
+    systemctl list-units --type=service --all --no-legend |
+    awk '{print $1}' | grep -E '^php[0-9]+\.[0-9]+-fpm\.service$' |
+    sort -V | tail -1
+  register: _php_fpm_svc
+  changed_when: false
+  become: true
+
+- name: PHP — fail if no FPM ini found
+  ansible.builtin.fail:
+    msg: "Could not locate a PHP-FPM php.ini under /etc/php/*/fpm/. Is PHP-FPM installed?"
+  when: _php_fpm_ini.stdout | length == 0
+
+- name: PHP — set resolved path/service facts
+  ansible.builtin.set_fact:
+    php_ini_path: "{{ _php_fpm_ini.stdout | trim }}"
+    php_fpm_service: "{{ _php_fpm_svc.stdout | trim }}"
+
+- name: PHP — display detected paths
+  ansible.builtin.debug:
+    msg: "PHP ini: {{ php_ini_path }} | FPM service: {{ php_fpm_service }}"
+
+# ---------------------------------------------------------------------------
+# 2. Back up original php.ini (once — skip if backup already exists)
+# ---------------------------------------------------------------------------
+- name: PHP — back up original php.ini
+  ansible.builtin.copy:
+    src: "{{ php_ini_path }}"
+    dest: "{{ php_ini_path }}.ccdc.bak"
+    remote_src: true
+    force: false
+    mode: "0644"
+  become: true
+
+# ---------------------------------------------------------------------------
+# 3. [PHP] section settings
+# ---------------------------------------------------------------------------
+- name: PHP — disable dangerous functions
+  community.general.ini_file:
+    path: "{{ php_ini_path }}"
+    section: PHP
+    option: disable_functions
+    value: "{{ php_harden_disable_functions | regex_replace('\\s+', '') }}"
+    backup: false
+  become: true
+  notify: Restart PHP-FPM
+
+- name: PHP — set expose_php Off
+  community.general.ini_file:
+    path: "{{ php_ini_path }}"
+    section: PHP
+    option: expose_php
+    value: "{{ php_harden_expose_php }}"
+  become: true
+  notify: Restart PHP-FPM
+
+- name: PHP — disable display_errors
+  community.general.ini_file:
+    path: "{{ php_ini_path }}"
+    section: PHP
+    option: display_errors
+    value: "{{ php_harden_display_errors }}"
+  become: true
+  notify: Restart PHP-FPM
+
+- name: PHP — disable display_startup_errors
+  community.general.ini_file:
+    path: "{{ php_ini_path }}"
+    section: PHP
+    option: display_startup_errors
+    value: "{{ php_harden_display_startup_errors }}"
+  become: true
+  notify: Restart PHP-FPM
+
+- name: PHP — enable log_errors
+  community.general.ini_file:
+    path: "{{ php_ini_path }}"
+    section: PHP
+    option: log_errors
+    value: "{{ php_harden_log_errors }}"
+  become: true
+  notify: Restart PHP-FPM
+
+- name: PHP — disable allow_url_fopen
+  community.general.ini_file:
+    path: "{{ php_ini_path }}"
+    section: PHP
+    option: allow_url_fopen
+    value: "{{ php_harden_allow_url_fopen }}"
+  become: true
+  notify: Restart PHP-FPM
+
+- name: PHP — disable allow_url_include
+  community.general.ini_file:
+    path: "{{ php_ini_path }}"
+    section: PHP
+    option: allow_url_include
+    value: "{{ php_harden_allow_url_include }}"
+  become: true
+  notify: Restart PHP-FPM
+
+- name: PHP — disable register_globals
+  community.general.ini_file:
+    path: "{{ php_ini_path }}"
+    section: PHP
+    option: register_globals
+    value: "{{ php_harden_register_globals }}"
+  become: true
+  notify: Restart PHP-FPM
+
+- name: PHP — set file_uploads
+  community.general.ini_file:
+    path: "{{ php_ini_path }}"
+    section: PHP
+    option: file_uploads
+    value: "{{ php_harden_file_uploads }}"
+  become: true
+  notify: Restart PHP-FPM
+
+- name: PHP — set upload_max_filesize
+  community.general.ini_file:
+    path: "{{ php_ini_path }}"
+    section: PHP
+    option: upload_max_filesize
+    value: "{{ php_harden_upload_max_filesize }}"
+  become: true
+  notify: Restart PHP-FPM
+
+- name: PHP — set post_max_size
+  community.general.ini_file:
+    path: "{{ php_ini_path }}"
+    section: PHP
+    option: post_max_size
+    value: "{{ php_harden_post_max_size }}"
+  become: true
+  notify: Restart PHP-FPM
+
+- name: PHP — set max_execution_time
+  community.general.ini_file:
+    path: "{{ php_ini_path }}"
+    section: PHP
+    option: max_execution_time
+    value: "{{ php_harden_max_execution_time }}"
+  become: true
+  notify: Restart PHP-FPM
+
+- name: PHP — set max_input_time
+  community.general.ini_file:
+    path: "{{ php_ini_path }}"
+    section: PHP
+    option: max_input_time
+    value: "{{ php_harden_max_input_time }}"
+  become: true
+  notify: Restart PHP-FPM
+
+- name: PHP — set memory_limit
+  community.general.ini_file:
+    path: "{{ php_ini_path }}"
+    section: PHP
+    option: memory_limit
+    value: "{{ php_harden_memory_limit }}"
+  become: true
+  notify: Restart PHP-FPM
+
+- name: PHP — set open_basedir
+  community.general.ini_file:
+    path: "{{ php_ini_path }}"
+    section: PHP
+    option: open_basedir
+    value: "{{ php_harden_open_basedir }}"
+  become: true
+  when: php_harden_open_basedir | length > 0
+  notify: Restart PHP-FPM
+
+# ---------------------------------------------------------------------------
+# 4. [Session] section settings
+# ---------------------------------------------------------------------------
+- name: PHP — set session.cookie_httponly
+  community.general.ini_file:
+    path: "{{ php_ini_path }}"
+    section: Session
+    option: session.cookie_httponly
+    value: "{{ php_harden_session_cookie_httponly }}"
+  become: true
+  notify: Restart PHP-FPM
+
+- name: PHP — set session.use_only_cookies
+  community.general.ini_file:
+    path: "{{ php_ini_path }}"
+    section: Session
+    option: session.use_only_cookies
+    value: "{{ php_harden_session_use_only_cookies }}"
+  become: true
+  notify: Restart PHP-FPM
+
+- name: PHP — set session.cookie_secure
+  community.general.ini_file:
+    path: "{{ php_ini_path }}"
+    section: Session
+    option: session.cookie_secure
+    value: "{{ php_harden_session_cookie_secure }}"
+  become: true
+  notify: Restart PHP-FPM
+
+- name: PHP — set session.cookie_samesite
+  community.general.ini_file:
+    path: "{{ php_ini_path }}"
+    section: Session
+    option: session.cookie_samesite
+    value: "{{ php_harden_session_cookie_samesite }}"
+  become: true
+  notify: Restart PHP-FPM
+
+- name: PHP — set session.use_strict_mode
+  community.general.ini_file:
+    path: "{{ php_ini_path }}"
+    section: Session
+    option: session.use_strict_mode
+    value: "{{ php_harden_session_use_strict_mode }}"
+  become: true
+  notify: Restart PHP-FPM
+
+- name: PHP — set session.gc_maxlifetime
+  community.general.ini_file:
+    path: "{{ php_ini_path }}"
+    section: Session
+    option: session.gc_maxlifetime
+    value: "{{ php_harden_session_gc_maxlifetime }}"
+  become: true
+  notify: Restart PHP-FPM

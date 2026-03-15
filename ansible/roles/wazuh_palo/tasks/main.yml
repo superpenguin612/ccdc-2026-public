@@ -1,0 +1,4 @@
+---
+- include_tasks: syslog_profile.yml
+- include_tasks: log_forwarding.yml
+- include_tasks: wazuh_rules.yml

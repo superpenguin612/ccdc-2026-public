@@ -1,0 +1,6 @@
+---
+- name: Create Remote_Pub_Net address object (other firewall's public subnet)
+  paloaltonetworks.panos.panos_address_object:
+    provider: "{{ panos_provider }}"
+    name: "Remote_Pub_Net"
+    value: "{{ hostvars[groups['firewalls'] | difference([inventory_hostname]) | first]['pub_net'] }}"

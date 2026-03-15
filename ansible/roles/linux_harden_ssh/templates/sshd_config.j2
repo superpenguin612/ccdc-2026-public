@@ -1,0 +1,16 @@
+# Managed by Ansible - replaces original to remove any red team persistence
+
+Port {{ linux_harden_ssh_port }}
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PubkeyAuthentication yes
+PermitRootLogin no
+AllowUsers {{ ssh_user }}
+PermitUserEnvironment no
+PermitUserRC no
+AuthorizedKeysFile .ssh/authorized_keys
+X11Forwarding no
+UsePAM yes
+PrintMotd no
+AcceptEnv LANG LC_*
+Subsystem sftp {% if ansible_os_family == "RedHat" %}/usr/libexec/openssh/sftp-server{% else %}/usr/lib/openssh/sftp-server{% endif %}

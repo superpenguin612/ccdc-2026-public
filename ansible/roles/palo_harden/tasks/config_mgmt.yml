@@ -1,0 +1,17 @@
+---
+- name: Configure Management Interface Profile
+  paloaltonetworks.panos.panos_management_profile:
+    provider: "{{ panos_provider }}"
+    name: "traffic"
+    permitted_ip: ["{{ mgmt_allowed_ip }}"]
+    ssh: false
+    telnet: false
+    snmp: false
+    https: true
+    ping: true
+
+- name: Configure Managment Interface NTP for Time Sync
+  paloaltonetworks.panos.panos_mgtconfig:
+    provider: "{{ panos_provider }}"
+    ntp_server_primary: "0.us.pool.ntp.org"
+    ntp_server_secondary: "1.us.pool.ntp.org"

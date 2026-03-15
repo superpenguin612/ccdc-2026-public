@@ -1,0 +1,77 @@
+---
+# ---------------------------------------------------------------------------
+# 1. Set MachineAccountQuota = 0
+#    Prevents non-admin users from joining computers to the domain
+# ---------------------------------------------------------------------------
+- name: AD — Set ms-DS-MachineAccountQuota to 0
+  ansible.windows.win_shell: |
+    Import-Module ActiveDirectory -ErrorAction Stop
+    $domain = (Get-ADDomain).DNSRoot
+    Set-ADDomain -Identity $domain -Replace @{"ms-DS-MachineAccountQuota" = "0"}
+    Write-Output "Set ms-DS-MachineAccountQuota=0 on $domain"
+  when: ad_harden_machine_account_quota
+  register: _ad_maq_result
+  changed_when: "'Set ms-DS-MachineAccountQuota' in _ad_maq_result.stdout"
+
+# ---------------------------------------------------------------------------
+# 2. Require LDAP signing
+#    Prevents LDAP relay; forces all LDAP clients to sign requests
+# ---------------------------------------------------------------------------
+- name: AD — Require LDAP signing on Domain Controller
+  ansible.windows.win_regedit:
+    path: HKLM:\SYSTEM\CurrentControlSet\Services\NTDS\Parameters
+    name: LDAPServerIntegrity
+    data: 2
+    type: dword
+    state: present
+  when: ad_harden_require_ldap_signing
+
+# ---------------------------------------------------------------------------
+# 3. Require LDAP channel binding (prevent LDAP relay over TLS)
+# ---------------------------------------------------------------------------
+- name: AD — Require LDAP channel binding token
+  ansible.windows.win_regedit:
+    path: HKLM:\SYSTEM\CurrentControlSet\Services\NTDS\Parameters
+    name: LdapEnforceChannelBinding
+    data: "{{ ad_harden_ldap_cbt_level }}"
+    type: dword
+    state: present
+  when: ad_harden_require_ldap_channel_binding
+
+# ---------------------------------------------------------------------------
+# 4. Enforce Secure-only dynamic DNS updates
+#    Prevents unauthenticated DNS record updates (DNS spoofing/poisoning)
+# ---------------------------------------------------------------------------
+- name: AD — Force all primary DNS zones to Secure dynamic updates only
+  ansible.windows.win_shell: |
+    $changed = @()
+    Get-DnsServerZone | Where-Object {
+        $_.ZoneType -eq 'Primary' -and
+        $_.DynamicUpdate -ne 'Secure' -and
+        -not $_.IsAutoCreated
+    } | ForEach-Object {
+        Set-DnsServerPrimaryZone -Name $_.ZoneName -DynamicUpdate Secure
+        $changed += $_.ZoneName
+    }
+    if ($changed.Count -gt 0) {
+        Write-Output "Secured: $($changed -join ', ')"
+    } else {
+        Write-Output "NoChange"
+    }
+  register: _ad_dns_zones
+  changed_when: "'Secured:' in _ad_dns_zones.stdout"
+  when: ad_harden_dns_secure_updates
+
+# ---------------------------------------------------------------------------
+# 5. Disable RC4 for Kerberos — force AES128 + AES256 only
+#    Value 24 = 0x18 = AES128 (0x08) | AES256 (0x10)
+#    This disables DES, RC4-HMAC, and other weak cipher suites
+# ---------------------------------------------------------------------------
+- name: AD — Disable RC4 and DES for Kerberos (allow AES only)
+  ansible.windows.win_regedit:
+    path: HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\Kerberos\Parameters
+    name: SupportedEncryptionTypes
+    data: 24
+    type: dword
+    state: present
+  when: ad_harden_disable_kerberos_rc4

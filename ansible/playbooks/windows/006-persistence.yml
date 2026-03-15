@@ -1,0 +1,13 @@
+---
+# Scan for and remove red team persistence mechanisms on Windows hosts.
+# Run after 002-harden-windows.yml.
+#
+# Usage:
+#   ansible-playbook playbooks/windows/004-persistence.yml
+
+- name: Hunt and remove Windows persistence
+  hosts: windows
+  gather_facts: false
+  roles:
+    - win_persistence
+    - win_clamav

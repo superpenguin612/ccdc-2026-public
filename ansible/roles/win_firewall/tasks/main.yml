@@ -1,0 +1,369 @@
+---
+# ---------------------------------------------------------------------------
+# 0. Export existing firewall policy before touching anything
+#    Saved to Documents\firewall-initial.wfw as a rollback reference
+# ---------------------------------------------------------------------------
+- name: Export current firewall policy (pre-hardening snapshot)
+  ansible.windows.win_shell: |
+    $out = "$env:USERPROFILE\Documents\firewall-initial.wfw"
+    if (-not (Test-Path $out)) {
+        netsh advfirewall export $out | Out-Null
+        Write-Output "exported"
+    } else {
+        Write-Output "noop"
+    }
+  register: _win_fw_export
+  changed_when: "'exported' in _win_fw_export.stdout"
+
+# ---------------------------------------------------------------------------
+# 1. Disable firewall, wipe all non-builtin rules, re-enable clean
+# ---------------------------------------------------------------------------
+- name: Disable all firewall profiles (while reconfiguring)
+  ansible.windows.win_shell: |
+    Set-NetFirewallProfile -Profile Domain,Private,Public -Enabled False
+
+- name: Disable all existing firewall rules (preserves rules, just disables them)
+  ansible.windows.win_shell: |
+    netsh advfirewall firewall set rule all new enable=no
+  changed_when: false
+
+- name: Set default inbound Block, outbound Allow (profiles stay disabled until all CCDC rules are added)
+  ansible.windows.win_shell: |
+    Set-NetFirewallProfile -Profile Domain,Private,Public `
+      -DefaultInboundAction Block `
+      -DefaultOutboundAction Allow `
+      -NotifyOnListen False
+  changed_when: false
+
+# ---------------------------------------------------------------------------
+# 2. Always-on rules: ICMP + Ansible management SSH
+# ---------------------------------------------------------------------------
+- name: Allow ICMP echo inbound (ping — needed for scoring checks)
+  community.windows.win_firewall_rule:
+    name: "CCDC - ICMP Echo Inbound"
+    direction: in
+    action: allow
+    protocol: icmpv4
+    profiles: "{{ win_firewall_profiles }}"
+    state: present
+    enabled: true
+
+- name: Allow Ansible SSH management inbound
+  community.windows.win_firewall_rule:
+    name: "CCDC - Ansible SSH Management"
+    direction: in
+    action: allow
+    protocol: tcp
+    localport: "{{ win_firewall_mgmt_ssh_port }}"
+    profiles: "{{ win_firewall_profiles }}"
+    state: present
+    enabled: true
+
+# ---------------------------------------------------------------------------
+# 3. Domain Controller — explicit AD protocol rules
+#    (avoids relying on DisplayGroup strings which vary by Windows version)
+# ---------------------------------------------------------------------------
+- name: Allow AD DC inbound — DNS (TCP + UDP 53)
+  community.windows.win_firewall_rule:
+    name: "CCDC - AD DNS {{ item | upper }}"
+    direction: in
+    action: allow
+    protocol: "{{ item }}"
+    localport: "53"
+    profiles: "{{ win_firewall_profiles }}"
+    state: present
+    enabled: true
+  loop: [tcp, udp]
+  when: inventory_hostname in groups['domain_controllers']
+
+- name: Allow AD DC inbound — Kerberos (TCP + UDP 88)
+  community.windows.win_firewall_rule:
+    name: "CCDC - AD Kerberos {{ item | upper }}"
+    direction: in
+    action: allow
+    protocol: "{{ item }}"
+    localport: "88"
+    profiles: "{{ win_firewall_profiles }}"
+    state: present
+    enabled: true
+  loop: [tcp, udp]
+  when: inventory_hostname in groups['domain_controllers']
+
+- name: Allow AD DC inbound — NTP (UDP 123, clients sync time to DC)
+  community.windows.win_firewall_rule:
+    name: "CCDC - AD NTP UDP"
+    direction: in
+    action: allow
+    protocol: udp
+    localport: "123"
+    profiles: "{{ win_firewall_profiles }}"
+    state: present
+    enabled: true
+  when: inventory_hostname in groups['domain_controllers']
+
+- name: Allow AD DC inbound — RPC Endpoint Mapper (TCP 135)
+  community.windows.win_firewall_rule:
+    name: "CCDC - AD RPC Endpoint Mapper"
+    direction: in
+    action: allow
+    protocol: tcp
+    localport: "135"
+    profiles: "{{ win_firewall_profiles }}"
+    state: present
+    enabled: true
+  when: inventory_hostname in groups['domain_controllers']
+
+- name: Allow AD DC inbound — LDAP (TCP 389)
+  community.windows.win_firewall_rule:
+    name: "CCDC - AD LDAP TCP"
+    direction: in
+    action: allow
+    protocol: tcp
+    localport: "389"
+    profiles: "{{ win_firewall_profiles }}"
+    state: present
+    enabled: true
+  when: inventory_hostname in groups['domain_controllers']
+
+- name: Allow AD DC inbound — LDAP UDP
+  community.windows.win_firewall_rule:
+    name: "CCDC - AD LDAP UDP"
+    direction: in
+    action: allow
+    protocol: udp
+    localport: "389"
+    profiles: "{{ win_firewall_profiles }}"
+    state: present
+    enabled: true
+  when: inventory_hostname in groups['domain_controllers']
+
+- name: Allow AD DC inbound — SMB (TCP 445, for SYSVOL/NETLOGON/GPO)
+  community.windows.win_firewall_rule:
+    name: "CCDC - AD SMB TCP"
+    direction: in
+    action: allow
+    protocol: tcp
+    localport: "445"
+    profiles: "{{ win_firewall_profiles }}"
+    state: present
+    enabled: true
+  when: inventory_hostname in groups['domain_controllers']
+
+- name: Allow AD DC inbound — Kerberos password change (TCP + UDP 464)
+  community.windows.win_firewall_rule:
+    name: "CCDC - AD Kerberos PW {{ item | upper }}"
+    direction: in
+    action: allow
+    protocol: "{{ item }}"
+    localport: "464"
+    profiles: "{{ win_firewall_profiles }}"
+    state: present
+    enabled: true
+  loop: [tcp, udp]
+  when: inventory_hostname in groups['domain_controllers']
+
+- name: Allow AD DC inbound — RPC dynamic ports (TCP 49152-65535)
+  community.windows.win_firewall_rule:
+    name: "CCDC - AD RPC Dynamic"
+    direction: in
+    action: allow
+    protocol: tcp
+    localport: "49152-65535"
+    profiles: "{{ win_firewall_profiles }}"
+    state: present
+    enabled: true
+  when: inventory_hostname in groups['domain_controllers']
+
+# ---------------------------------------------------------------------------
+# 4. Service-based rules — keyed on fw_ group membership
+# ---------------------------------------------------------------------------
+
+# --- DNS (standalone, also covers the DC but redundant is fine) ---
+- name: Allow DNS inbound (TCP + UDP 53)
+  community.windows.win_firewall_rule:
+    name: "CCDC - DNS {{ item | upper }}"
+    direction: in
+    action: allow
+    protocol: "{{ item }}"
+    localport: "53"
+    profiles: "{{ win_firewall_profiles }}"
+    state: present
+    enabled: true
+  loop: [tcp, udp]
+  when:
+    - inventory_hostname in groups['fw_dns']
+    - inventory_hostname not in groups['domain_controllers']  # already added above
+
+# --- HTTP ---
+- name: Allow HTTP inbound (TCP 80)
+  community.windows.win_firewall_rule:
+    name: "CCDC - HTTP"
+    direction: in
+    action: allow
+    protocol: tcp
+    localport: "80"
+    profiles: "{{ win_firewall_profiles }}"
+    state: present
+    enabled: true
+  when: inventory_hostname in groups['fw_http']
+
+# --- HTTPS ---
+- name: Allow HTTPS inbound (TCP 443)
+  community.windows.win_firewall_rule:
+    name: "CCDC - HTTPS"
+    direction: in
+    action: allow
+    protocol: tcp
+    localport: "443"
+    profiles: "{{ win_firewall_profiles }}"
+    state: present
+    enabled: true
+  when: inventory_hostname in groups['fw_https']
+
+# --- FTP ---
+- name: Allow FTP control inbound (TCP 21)
+  community.windows.win_firewall_rule:
+    name: "CCDC - FTP Control"
+    direction: in
+    action: allow
+    protocol: tcp
+    localport: "21"
+    profiles: "{{ win_firewall_profiles }}"
+    state: present
+    enabled: true
+  when: inventory_hostname in groups['fw_ftp']
+
+- name: Allow FTP active data inbound (TCP 20)
+  community.windows.win_firewall_rule:
+    name: "CCDC - FTP Active Data"
+    direction: in
+    action: allow
+    protocol: tcp
+    localport: "20"
+    profiles: "{{ win_firewall_profiles }}"
+    state: present
+    enabled: true
+  when: inventory_hostname in groups['fw_ftp']
+
+- name: Allow FTP passive data inbound (TCP {{ win_firewall_ftp_passive_start }}-{{ win_firewall_ftp_passive_end }})
+  community.windows.win_firewall_rule:
+    name: "CCDC - FTP Passive Data"
+    direction: in
+    action: allow
+    protocol: tcp
+    localport: "{{ win_firewall_ftp_passive_start }}-{{ win_firewall_ftp_passive_end }}"
+    profiles: "{{ win_firewall_profiles }}"
+    state: present
+    enabled: true
+  when: inventory_hostname in groups['fw_ftp']
+
+# --- SMTP ---
+- name: Allow SMTP inbound (TCP 25)
+  community.windows.win_firewall_rule:
+    name: "CCDC - SMTP"
+    direction: in
+    action: allow
+    protocol: tcp
+    localport: "25"
+    profiles: "{{ win_firewall_profiles }}"
+    state: present
+    enabled: true
+  when: inventory_hostname in groups['fw_smtp']
+
+# --- POP3 ---
+- name: Allow POP3 inbound (TCP 110)
+  community.windows.win_firewall_rule:
+    name: "CCDC - POP3"
+    direction: in
+    action: allow
+    protocol: tcp
+    localport: "110"
+    profiles: "{{ win_firewall_profiles }}"
+    state: present
+    enabled: true
+  when: inventory_hostname in groups['fw_pop3']
+
+# --- IMAP ---
+- name: Allow IMAP inbound (TCP 143)
+  community.windows.win_firewall_rule:
+    name: "CCDC - IMAP"
+    direction: in
+    action: allow
+    protocol: tcp
+    localport: "143"
+    profiles: "{{ win_firewall_profiles }}"
+    state: present
+    enabled: true
+  when: inventory_hostname in groups['fw_imap']
+
+# --- Splunk ---
+- name: Allow Splunk web inbound (TCP 8000)
+  community.windows.win_firewall_rule:
+    name: "CCDC - Splunk Web"
+    direction: in
+    action: allow
+    protocol: tcp
+    localport: "8000"
+    profiles: "{{ win_firewall_profiles }}"
+    state: present
+    enabled: true
+  when: inventory_hostname in groups['fw_splunk']
+
+- name: Allow Splunk forwarder inbound (TCP 9997)
+  community.windows.win_firewall_rule:
+    name: "CCDC - Splunk Forwarder"
+    direction: in
+    action: allow
+    protocol: tcp
+    localport: "9997"
+    profiles: "{{ win_firewall_profiles }}"
+    state: present
+    enabled: true
+  when: inventory_hostname in groups['fw_splunk']
+
+# --- NTP ---
+- name: Allow NTP inbound (UDP 123)
+  community.windows.win_firewall_rule:
+    name: "CCDC - NTP"
+    direction: in
+    action: allow
+    protocol: udp
+    localport: "123"
+    profiles: "{{ win_firewall_profiles }}"
+    state: present
+    enabled: true
+  when: inventory_hostname in groups['fw_ntp']
+
+# --- TFTP ---
+- name: Allow TFTP inbound (UDP 69)
+  community.windows.win_firewall_rule:
+    name: "CCDC - TFTP"
+    direction: in
+    action: allow
+    protocol: udp
+    localport: "69"
+    profiles: "{{ win_firewall_profiles }}"
+    state: present
+    enabled: true
+  when: inventory_hostname in groups['fw_tftp']
+
+# --- Wazuh ---
+- name: Allow Wazuh agent comms inbound (TCP 1514-1515)
+  community.windows.win_firewall_rule:
+    name: "CCDC - Wazuh Agent"
+    direction: in
+    action: allow
+    protocol: tcp
+    localport: "1514-1515"
+    profiles: "{{ win_firewall_profiles }}"
+    state: present
+    enabled: true
+  when: inventory_hostname in groups['fw_wazuh']
+
+# ---------------------------------------------------------------------------
+# Final: re-enable all profiles now that all CCDC allow rules are in place
+# ---------------------------------------------------------------------------
+- name: Re-enable all firewall profiles (CCDC rules now active)
+  ansible.windows.win_shell: |
+    Set-NetFirewallProfile -Profile Domain,Private,Public -Enabled True
+  changed_when: false

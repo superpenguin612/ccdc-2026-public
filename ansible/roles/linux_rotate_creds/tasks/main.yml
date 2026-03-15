@@ -1,0 +1,42 @@
+---
+- name: Create new user
+  ansible.builtin.user:
+    name: "{{ vault_new_credentials[inventory_hostname].user }}"
+    password: "{{ vault_new_credentials[inventory_hostname].password | password_hash('sha512') }}"
+    shell: /bin/bash
+    groups: "{{ linux_sudo_group }}"
+    append: yes
+    state: present
+  become: yes
+
+- name: Add SSH authorized key for new user
+  ansible.posix.authorized_key:
+    user: "{{ vault_new_credentials[inventory_hostname].user }}"
+    key: "{{ vault_ssh_public_key }}"
+    state: present
+  become: yes
+
+- name: Switch to new credentials (key-based)
+  ansible.builtin.set_fact:
+    ansible_user:                 "{{ vault_new_credentials[inventory_hostname].user }}"
+    ansible_password:             ""
+    ansible_become_password:      "{{ vault_new_credentials[inventory_hostname].password }}"
+    ansible_ssh_private_key_file: "{{ lookup('env', 'HOME') }}/.ssh/ansible_private_key"
+  no_log: true
+
+- name: Reset connection to re-authenticate as new user via SSH key
+  ansible.builtin.meta: reset_connection
+
+- name: Verify connectivity with SSH key
+  ansible.builtin.ping:
+  become: false
+
+- name: Lock old user account
+  ansible.builtin.user:
+    name: "{{ host_defaults[inventory_hostname].user }}"
+    password_lock: yes
+  become: yes
+
+- name: Print confirmation
+  ansible.builtin.debug:
+    msg: "{{ inventory_hostname }}: rotated to {{ vault_new_credentials[inventory_hostname].user }}"

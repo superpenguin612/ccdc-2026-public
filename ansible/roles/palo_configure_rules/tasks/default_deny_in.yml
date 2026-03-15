@@ -1,0 +1,13 @@
+---
+- name: Default Deny All In
+  paloaltonetworks.panos.panos_security_rule:
+    provider: "{{ panos_provider }}"
+    rule_name: "Default_Deny_In"
+    source_zone: ["external"]
+    source_ip: ["any"]
+    destination_zone: ["internal"]
+    destination_ip: ["any"]
+    application: ["any"]
+    service: ["any"]
+    action: "deny"
+    location: "bottom"

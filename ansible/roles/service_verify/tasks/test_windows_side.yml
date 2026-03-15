@@ -1,0 +1,112 @@
+---
+# =============================================================================
+# Tests run on ubuntu-wkst (Linux/bash) targeting Windows-side services.
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# server-web — IIS HTTP
+# ---------------------------------------------------------------------------
+- name: "Test server-web IIS HTTP ({{ svc_verify_iis_http_host }}:{{ svc_verify_iis_http_port }})"
+  ansible.builtin.shell: |
+    STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+        --max-time {{ svc_verify_iis_http_timeout_sec }} \
+        "http://{{ svc_verify_iis_http_host }}:{{ svc_verify_iis_http_port }}{{ svc_verify_iis_http_path }}" 2>&1)
+    if [ $? -ne 0 ]; then
+        echo "FAIL:curl error $STATUS"
+    elif echo "$STATUS" | grep -qE '^[2345][0-9][0-9]$' && [ "$STATUS" -lt 500 ]; then
+        echo "PASS:HTTP $STATUS"
+    else
+        echo "FAIL:HTTP $STATUS"
+    fi
+  register: _verify_iis_http
+  changed_when: false
+  failed_when: false
+  when: svc_verify_iis_http_enabled
+
+- name: "Result — server-web IIS HTTP"
+  ansible.builtin.fail:
+    msg: "server-web IIS HTTP: {{ _verify_iis_http.stdout | default('SKIP') | trim }}"
+  when: svc_verify_iis_http_enabled and (_verify_iis_http.stdout | default('') | trim) is search('^FAIL')
+  ignore_errors: true
+
+# ---------------------------------------------------------------------------
+# server-ftp — IIS FTP (authenticate with vault credentials)
+# ---------------------------------------------------------------------------
+- name: "Test server-ftp FTP ({{ svc_verify_ftp_host }}:{{ svc_verify_ftp_port }}) as {{ svc_verify_ftp_user }}"
+  ansible.builtin.shell: |
+    # curl exits 0 on successful login (even if dir is empty).
+    # -l = LIST (NAME only) so we get a directory listing attempt.
+    # Use --ftp-pasv for passive mode (NAT-friendly).
+    OUT=$(curl -s -l \
+        --ftp-pasv \
+        --max-time {{ svc_verify_ftp_timeout_sec }} \
+        "ftp://{{ svc_verify_ftp_user | urlencode }}:{{ svc_verify_ftp_password | urlencode }}@{{ svc_verify_ftp_host }}:{{ svc_verify_ftp_port }}/" \
+        2>&1)
+    RC=$?
+    if [ $RC -eq 0 ]; then
+        echo "PASS:FTP login and LIST succeeded"
+    elif [ $RC -eq 67 ]; then
+        echo "FAIL:FTP authentication failed (bad credentials)"
+    elif [ $RC -eq 7 ]; then
+        echo "FAIL:FTP connection refused (service down)"
+    elif [ $RC -eq 28 ]; then
+        echo "FAIL:FTP timeout"
+    else
+        echo "FAIL:curl exit $RC: $OUT"
+    fi
+  register: _verify_ftp
+  changed_when: false
+  failed_when: false
+  no_log: true   # suppress vault password from logs
+  when: svc_verify_ftp_enabled
+
+- name: "Result — server-ftp FTP"
+  ansible.builtin.fail:
+    msg: "server-ftp FTP (user={{ svc_verify_ftp_user }}): {{ _verify_ftp.stdout | default('SKIP') | trim }}"
+  when: svc_verify_ftp_enabled and (_verify_ftp.stdout | default('') | trim) is search('^FAIL')
+  ignore_errors: true
+
+# ---------------------------------------------------------------------------
+# server-ad-dns — DNS resolution
+# ---------------------------------------------------------------------------
+- name: "Ensure dig is available for DNS test"
+  ansible.builtin.package:
+    name: dnsutils
+    state: present
+  become: true
+  failed_when: false
+  when: svc_verify_dns_enabled
+
+- name: "Test server-ad-dns DNS ({{ svc_verify_dns_host }}:{{ svc_verify_dns_port }}) — resolve {{ svc_verify_dns_test_record }}"
+  ansible.builtin.shell: |
+    OUT=$(dig +short +time={{ svc_verify_dns_timeout_sec }} +tries=1 \
+        "@{{ svc_verify_dns_host }}" -p {{ svc_verify_dns_port }} \
+        "{{ svc_verify_dns_test_record }}" A 2>&1)
+    RC=$?
+    if [ $RC -ne 0 ]; then
+        echo "FAIL:dig error rc=$RC: $OUT"
+    elif [ -z "$OUT" ]; then
+        echo "FAIL:DNS returned empty response for {{ svc_verify_dns_test_record }}"
+    else
+        echo "PASS:resolved {{ svc_verify_dns_test_record }} -> $OUT"
+    fi
+  register: _verify_dns
+  changed_when: false
+  failed_when: false
+  when: svc_verify_dns_enabled
+
+- name: "Result — server-ad-dns DNS"
+  ansible.builtin.fail:
+    msg: "server-ad-dns DNS: {{ _verify_dns.stdout | default('SKIP') | trim }}"
+  when: svc_verify_dns_enabled and (_verify_dns.stdout | default('') | trim) is search('^FAIL')
+  ignore_errors: true
+
+# ---------------------------------------------------------------------------
+# Summary (Windows-side)
+# ---------------------------------------------------------------------------
+- name: "=== Windows-side Service Verification Summary ==="
+  ansible.builtin.debug:
+    msg:
+      - "server-web  IIS HTTP : {{ _verify_iis_http.stdout | default('SKIP') | trim }}"
+      - "server-ftp  FTP      : {{ _verify_ftp.stdout      | default('SKIP') | trim }}"
+      - "server-dns  DNS      : {{ _verify_dns.stdout      | default('SKIP') | trim }}"

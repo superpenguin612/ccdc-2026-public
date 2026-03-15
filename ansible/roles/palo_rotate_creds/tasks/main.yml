@@ -1,0 +1,60 @@
+---
+- name: Create new superuser
+  paloaltonetworks.panos.panos_administrator:
+    provider: "{{ panos_provider }}"
+    admin_username: "{{ vault_new_credentials[inventory_hostname].user }}"
+    admin_password: "{{ vault_new_credentials[inventory_hostname].password }}"
+    superuser: true
+    state: "present"
+
+- name: Commit pending configuration
+  paloaltonetworks.panos.panos_commit_firewall:
+    provider: "{{ panos_provider }}"
+  async: 300
+  poll: 10
+  register: results
+
+- debug:
+    msg: "Commit with Job ID: {{ results.jobid }} had output: {{ results.details }}"
+
+- name: Wait for PAN over SSH to be ready
+  ansible.builtin.wait_for:
+    host: "{{ ansible_host }}"
+    port: "{{ panos_port }}"
+    delay: 10
+    timeout: 300
+  delegate_to: localhost
+  when: panos_port is defined
+
+- name: Test connection with new credentials
+  paloaltonetworks.panos.panos_facts:
+    provider:
+      ip_address: "{{ panos_provider.ip_address }}"
+      port: "{{ panos_provider.port }}"
+      username: "{{ vault_new_credentials[inventory_hostname].user }}"
+      password: "{{ vault_new_credentials[inventory_hostname].password }}"
+  register: auth_result
+
+- name: Gather all admin accounts
+  paloaltonetworks.panos.panos_administrator:
+    provider:
+      ip_address: "{{ panos_provider.ip_address }}"
+      port: "{{ panos_provider.port }}"
+      username: "{{ vault_new_credentials[inventory_hostname].user }}"
+      password: "{{ vault_new_credentials[inventory_hostname].password }}"
+    state: gathered
+    gathered_filter: "*"
+  register: all_admins
+
+- name: Delete all accounts except new user
+  paloaltonetworks.panos.panos_administrator:
+    provider:
+      ip_address: "{{ panos_provider.ip_address }}"
+      port: "{{ panos_provider.port }}"
+      username: "{{ vault_new_credentials[inventory_hostname].user }}"
+      password: "{{ vault_new_credentials[inventory_hostname].password }}"
+    admin_username: "{{ item.admin_username }}"
+    state: absent
+  loop: "{{ all_admins.gathered | default([]) }}"
+  when: item.admin_username != vault_new_credentials[inventory_hostname].user
+

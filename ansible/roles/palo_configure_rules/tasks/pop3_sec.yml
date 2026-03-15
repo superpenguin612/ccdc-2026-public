@@ -1,0 +1,16 @@
+---
+- name: Allow inbound POP3 Secure
+  paloaltonetworks.panos.panos_security_rule:
+    provider: "{{ panos_provider }}"
+    rule_name: "Inbound_POP3Sec_{{ hostvars[host_item]['inventory_hostname'] }}"
+    source_zone: ["external"]
+    source_ip: ["any"]
+    destination_zone: ["internal"]
+    destination_ip: ["External_{{ hostvars[host_item]['inventory_hostname'] }}"]
+    application: "{{ app_type_mappings.fw_pop3_secure.palo_apps }}"
+    service: "{{ app_type_mappings.fw_pop3_secure.palo_service }}"
+    action: "allow"
+    log_setting: "{{ palo_log_setting }}"
+  loop: "{{ groups['fw_pop3_secure'] | default([]) | intersect(groups[protected_group] | default([])) }}"
+  loop_control:
+    loop_var: host_item

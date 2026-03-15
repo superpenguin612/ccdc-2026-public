@@ -1,0 +1,13 @@
+---
+- name: Allow ICMP Everywhere
+  paloaltonetworks.panos.panos_security_rule:
+    provider: "{{ panos_provider }}"
+    rule_name: "ICMP_Allow"
+    source_zone: ["any"]
+    source_ip: ["any"]
+    destination_zone: ["any"]
+    destination_ip: ["any"]
+    application: ['icmp', 'ping']
+    service: ['application-default']
+    action: "allow"
+    location: "top"

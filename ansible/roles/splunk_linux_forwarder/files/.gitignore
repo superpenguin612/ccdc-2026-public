@@ -1,0 +1,4 @@
+# Large binary files — store locally, not in git
+*.tgz
+*.tar.gz
+*.zip

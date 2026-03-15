@@ -1,0 +1,166 @@
+---
+# ---------------------------------------------------------------------------
+# 1. Check if already installed
+# ---------------------------------------------------------------------------
+- name: SplunkUF — check if already installed
+  ansible.windows.win_stat:
+    path: "{{ install_dir }}\\bin\\splunk.exe"
+  register: uf_bin
+
+# ---------------------------------------------------------------------------
+# 2. Copy MSI from controller and install (only if needed)
+# ---------------------------------------------------------------------------
+- name: SplunkUF — copy MSI installer from controller
+  ansible.windows.win_copy:
+    src: "{{ installer_msi_name }}"
+    dest: "{{ installer_dest }}"
+  when: not uf_bin.stat.exists
+
+- name: SplunkUF — install Universal Forwarder
+  ansible.windows.win_package:
+    path: "{{ installer_dest }}"
+    arguments: >-
+      AGREETOLICENSE=Yes
+      INSTALLDIR="{{ install_dir }}"
+      SPLUNKUSERNAME={{ splunk_uf_user }}
+      SPLUNKPASSWORD={{ splunk_uf_pass }}
+      RECEIVING_INDEXER={{ splunk_indexer_ip }}:{{ splunk_indexer_port }}
+    state: present
+  when: not uf_bin.stat.exists
+  no_log: true
+
+# ---------------------------------------------------------------------------
+# 3. Ensure config directories exist
+# ---------------------------------------------------------------------------
+- name: SplunkUF — ensure local config dir exists
+  ansible.windows.win_file:
+    path: "{{ install_dir }}\\etc\\system\\local"
+    state: directory
+
+- name: SplunkUF — ensure apps dir exists
+  ansible.windows.win_file:
+    path: "{{ install_dir }}\\etc\\apps"
+    state: directory
+
+# ---------------------------------------------------------------------------
+# 4. Deploy configuration files
+# ---------------------------------------------------------------------------
+- name: SplunkUF — deploy outputs.conf (indexer config)
+  ansible.windows.win_template:
+    src: outputs.conf.j2
+    dest: "{{ install_dir }}\\etc\\system\\local\\outputs.conf"
+  notify: Restart SplunkForwarder
+
+- name: SplunkUF — deploy server.conf (server name)
+  ansible.windows.win_template:
+    src: server.conf.j2
+    dest: "{{ install_dir }}\\etc\\system\\local\\server.conf"
+  notify: Restart SplunkForwarder
+
+- name: SplunkUF — deploy base Windows inputs.conf
+  ansible.windows.win_copy:
+    src: windows-inputs.conf
+    dest: "{{ install_dir }}\\etc\\system\\local\\inputs.conf"
+  notify: Restart SplunkForwarder
+
+# ---------------------------------------------------------------------------
+# 5. Host-specific inputs
+# ---------------------------------------------------------------------------
+- name: SplunkUF — deploy IIS inputs.conf (IIS web/FTP hosts)
+  ansible.windows.win_copy:
+    src: iis-inputs.conf
+    dest: "{{ install_dir }}\\etc\\apps\\iis_inputs\\local\\inputs.conf"
+  when: >
+    inventory_hostname in groups['svc_iis'] | default([]) or
+    inventory_hostname in groups['svc_iis_ftp'] | default([])
+  notify: Restart SplunkForwarder
+  register: _iis_inputs
+
+- name: SplunkUF — ensure IIS inputs app dir exists (before deploying)
+  ansible.windows.win_file:
+    path: "{{ install_dir }}\\etc\\apps\\iis_inputs\\local"
+    state: directory
+  when: _iis_inputs is defined and _iis_inputs is skipped == false
+  failed_when: false
+
+- name: SplunkUF — deploy DNS inputs.conf (DNS server only)
+  ansible.windows.win_copy:
+    src: dns-inputs.conf
+    dest: "{{ install_dir }}\\etc\\apps\\dns_inputs\\local\\inputs.conf"
+  when: inventory_hostname in groups['svc_dns'] | default([])
+  notify: Restart SplunkForwarder
+  register: _dns_inputs
+
+- name: SplunkUF — ensure DNS inputs app dir exists (before deploying)
+  ansible.windows.win_file:
+    path: "{{ install_dir }}\\etc\\apps\\dns_inputs\\local"
+    state: directory
+  when: _dns_inputs is defined and _dns_inputs is skipped == false
+  failed_when: false
+
+# ---------------------------------------------------------------------------
+# 6. Install Technology Add-ons
+# ---------------------------------------------------------------------------
+- name: SplunkUF — ensure TA staging directory exists
+  ansible.windows.win_file:
+    path: C:\Windows\Temp\splunk_tas
+    state: directory
+
+- name: SplunkUF — copy base TA archives from controller
+  ansible.windows.win_copy:
+    src: "{{ item }}"
+    dest: "C:\\Windows\\Temp\\splunk_tas\\{{ item }}"
+  loop: "{{ splunk_ta_archives }}"
+
+- name: SplunkUF — install base TAs into etc/apps
+  community.windows.win_unzip:
+    src: "C:\\Windows\\Temp\\splunk_tas\\{{ item }}"
+    dest: "{{ install_dir }}\\etc\\apps"
+    delete_archive: false
+  loop: "{{ splunk_ta_archives }}"
+  notify: Restart SplunkForwarder
+
+- name: SplunkUF — copy IIS TA archive from controller
+  ansible.windows.win_copy:
+    src: "{{ splunk_ta_iis_archive }}"
+    dest: "C:\\Windows\\Temp\\splunk_tas\\{{ splunk_ta_iis_archive }}"
+  when: >
+    inventory_hostname in groups['svc_iis'] | default([]) or
+    inventory_hostname in groups['svc_iis_ftp'] | default([])
+
+- name: SplunkUF — install IIS TA into etc/apps
+  community.windows.win_unzip:
+    src: "C:\\Windows\\Temp\\splunk_tas\\{{ splunk_ta_iis_archive }}"
+    dest: "{{ install_dir }}\\etc\\apps"
+    delete_archive: false
+  when: >
+    inventory_hostname in groups['svc_iis'] | default([]) or
+    inventory_hostname in groups['svc_iis_ftp'] | default([])
+  notify: Restart SplunkForwarder
+
+# ---------------------------------------------------------------------------
+# 7. Ensure service is running
+# ---------------------------------------------------------------------------
+- name: SplunkUF — ensure SplunkForwarder service is set to auto-start
+  ansible.windows.win_service:
+    name: SplunkForwarder
+    start_mode: auto
+
+- name: SplunkUF — ensure SplunkForwarder service is running
+  ansible.windows.win_service:
+    name: SplunkForwarder
+    state: started
+
+# ---------------------------------------------------------------------------
+# 8. Cleanup
+# ---------------------------------------------------------------------------
+- name: SplunkUF — remove MSI installer
+  ansible.windows.win_file:
+    path: "{{ installer_dest }}"
+    state: absent
+  when: not uf_bin.stat.exists
+
+- name: SplunkUF — clean up TA staging directory
+  ansible.windows.win_file:
+    path: C:\Windows\Temp\splunk_tas
+    state: absent

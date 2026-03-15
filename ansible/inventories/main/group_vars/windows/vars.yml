@@ -1,0 +1,31 @@
+---
+_creds: "{{ host_defaults[inventory_hostname] if (use_default_creds | default(false)) else (vault_new_credentials | default({}))[inventory_hostname] }}"
+
+# SSH port — value stored in vault (vault_ssh_port)
+windows_ssh_port: "{{ vault_ssh_port }}"
+
+ansible_user:     "{{ _creds.user }}"
+ansible_password: "{{ _creds.password if (use_winrm | default(false)) else '' }}"
+ansible_ssh_private_key_file: ~/.ssh/ansible_private_key
+ansible_shell_type: powershell
+
+ansible_connection:              "{{ 'winrm' if (use_winrm | default(false)) else 'ssh' }}"
+ansible_port:                    "{{ 5985 if (use_winrm | default(false)) else windows_ssh_port }}"
+
+ansible_winrm_transport:         ntlm
+ansible_winrm_server_cert_validation: ignore
+
+ansible_winrm_operation_timeout_sec: 120
+ansible_winrm_read_timeout_sec: 150
+ansible_winrm_connection_timeout: 30
+ansible_winrm_message_encryption: always
+
+windows_service_name_map:
+  dns:  DNS
+  iis:  W3SVC
+  ftp:  FTPSVC
+
+wazuh_manager: "{{ hostvars['splunk']['ip_external'] }}"
+wazuh_agent_name: "{{ inventory_hostname }}"
+wazuh_agent_group: "windows"
+

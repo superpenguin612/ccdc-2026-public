@@ -1,0 +1,20 @@
+---
+# Set ms-DS-MachineAccountQuota to 0 to prevent non-admins from joining machines to the domain
+ad_harden_machine_account_quota: true
+
+# Require LDAP signing (prevent LDAP relay attacks)
+ad_harden_require_ldap_signing: true
+
+# Require LDAP channel binding (prevent LDAP relay over TLS)
+ad_harden_require_ldap_channel_binding: true
+
+# Force DNS dynamic updates to Secure only (prevent unauthenticated DNS record spoofing)
+ad_harden_dns_secure_updates: true
+
+# Disable RC4 for Kerberos — only allow AES128 + AES256
+# WARNING: Can break legacy clients; safe for modern-only environments
+ad_harden_disable_kerberos_rc4: true
+
+# Require LDAPS/LDAP channel binding token (CBT)
+# 0 = Never, 1 = When supported, 2 = Always
+ad_harden_ldap_cbt_level: 2

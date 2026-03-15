@@ -1,0 +1,66 @@
+---
+- name: Configure Wazuh agent log sources
+  ansible.builtin.blockinfile:
+    path: /var/ossec/etc/ossec.conf
+    marker: "  <!-- {mark} ANSIBLE MANAGED - custom localfile sources -->"
+    insertbefore: "</ossec_config>"
+    block: |
+      <!-- Apache2 logs with correct format -->
+      <localfile>
+        <location>/var/log/apache2/access.log</location>
+        <log_format>apache</log_format>
+      </localfile>
+      <localfile>
+        <location>/var/log/apache2/error.log</location>
+        <log_format>apache</log_format>
+      </localfile>
+      <localfile>
+        <location>/var/log/apache2/modsec_audit.log</location>
+        <log_format>apache</log_format>
+      </localfile>
+
+      <!-- Auth and kernel logs -->
+      <localfile>
+        <location>/var/log/auth.log</location>
+        <log_format>syslog</log_format>
+      </localfile>
+      <localfile>
+        <location>/var/log/kern.log</location>
+        <log_format>syslog</log_format>
+      </localfile>
+
+      <!-- Audit daemon logs -->
+      <localfile>
+        <location>/var/log/audit/audit.log</location>
+        <log_format>audit</log_format>
+      </localfile>
+
+      <!-- Mail logs (for fedora-webmail and mail services) -->
+      <localfile>
+        <location>/var/log/maillog</location>
+        <log_format>syslog</log_format>
+      </localfile>
+      <localfile>
+        <location>/var/log/mail.log</location>
+        <log_format>syslog</log_format>
+      </localfile>
+      <localfile>
+        <location>/var/log/mail.err</location>
+        <log_format>syslog</log_format>
+      </localfile>
+
+      <!-- sshesame SSH honeypot log (JSON format) -->
+      <localfile>
+        <location>/var/log/sshesame.log</location>
+        <log_format>json</log_format>
+        <label key="log_source">sshesame</label>
+      </localfile>
+
+      <!-- Monitor for suspicious files in temp dirs -->
+      <localfile>
+        <log_format>full_command</log_format>
+        <command>find /tmp /var/tmp -type f -mmin -10 2>/dev/null</command>
+        <frequency>180</frequency>
+      </localfile>
+  become: true
+  notify: Restart wazuh-agent

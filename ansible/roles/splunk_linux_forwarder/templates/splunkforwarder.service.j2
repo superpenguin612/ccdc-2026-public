@@ -1,0 +1,22 @@
+# Managed by Ansible — do not edit manually
+[Unit]
+Description=Splunk Universal Forwarder
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=splunk
+Group=splunk
+ExecStart={{ install_dir }}/bin/splunk start --nodaemon
+ExecStop={{ install_dir }}/bin/splunk stop
+Restart=on-failure
+RestartSec=10
+TimeoutStartSec=120
+TimeoutStopSec=120
+LimitNOFILE=65536
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

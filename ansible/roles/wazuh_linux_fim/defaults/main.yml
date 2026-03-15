@@ -1,0 +1,17 @@
+---
+wazuh_fim_dirs:
+  - path: /etc
+  - path: /root
+  - path: /home
+  - path: /bin
+  - path: /sbin
+  - path: /usr/bin
+  - path: /usr/sbin
+  - path: /boot
+  - path: /tmp
+    report_changes: "no"
+
+# Per-host extra dirs — override in host_vars:
+# wazuh_fim_extra_dirs:
+#   - path: /var/www/html
+wazuh_fim_extra_dirs: []

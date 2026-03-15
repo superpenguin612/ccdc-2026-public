@@ -1,0 +1,44 @@
+---
+- name: Configure NTP server to pool.ntp.org
+  win_regedit:
+    path: HKLM:\SYSTEM\CurrentControlSet\Services\W32Time\Parameters
+    name: NtpServer
+    data: pool.ntp.org,0x9
+    type: string
+    state: present
+
+- name: Set time sync type to NTP
+  win_regedit:
+    path: HKLM:\SYSTEM\CurrentControlSet\Services\W32Time\Parameters
+    name: Type
+    data: NTP
+    type: string
+    state: present
+
+- name: Set NTP poll interval (SpecialPollInterval = 3600s)
+  win_regedit:
+    path: HKLM:\SYSTEM\CurrentControlSet\Services\W32Time\TimeProviders\NtpClient
+    name: SpecialPollInterval
+    data: 3600
+    type: dword
+    state: present
+
+- name: Enable NtpClient
+  win_regedit:
+    path: HKLM:\SYSTEM\CurrentControlSet\Services\W32Time\TimeProviders\NtpClient
+    name: Enabled
+    data: 1
+    type: dword
+    state: present
+
+- name: Ensure Windows Time service is running and set to auto
+  ansible.windows.win_service:
+    name: W32Time
+    state: started
+    start_mode: auto
+
+- name: Register Windows Time service
+  ansible.windows.win_command: w32tm /register
+
+- name: Force immediate time resync
+  ansible.windows.win_command: w32tm /resync /force

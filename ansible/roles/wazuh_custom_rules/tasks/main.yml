@@ -1,0 +1,71 @@
+---
+# ---------------------------------------------------------------------------
+# 1. SOCFortress Wazuh-Rules community ruleset (pre-cloned, no internet needed)
+# ---------------------------------------------------------------------------
+- name: Find all SOCFortress rule/decoder XML files
+  ansible.builtin.find:
+    paths: "{{ role_path }}/files/Wazuh-Rules"
+    patterns: "*.xml"
+    recurse: true
+  register: _socfortress_xmls
+  delegate_to: localhost
+
+- name: Separate decoder files from rule files
+  ansible.builtin.set_fact:
+    _socfortress_decoders: "{{ _socfortress_xmls.files | map(attribute='path') | select('search', 'decoder') | list }}"
+    _socfortress_rules: "{{ _socfortress_xmls.files | map(attribute='path') | reject('search', 'decoder') | list }}"
+
+- name: Deploy SOCFortress rule XMLs to rules directory
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/var/ossec/etc/rules/{{ item | basename }}"
+    owner: wazuh
+    group: wazuh
+    mode: "0660"
+  loop: "{{ _socfortress_rules }}"
+  become: true
+  notify: Restart wazuh-manager
+
+- name: Deploy SOCFortress decoder XMLs to decoders directory
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/var/ossec/etc/decoders/{{ item | basename }}"
+    owner: wazuh
+    group: wazuh
+    mode: "0660"
+  loop: "{{ _socfortress_decoders }}"
+  become: true
+  notify: Restart wazuh-manager
+
+# ---------------------------------------------------------------------------
+# 2. CCDC custom rules (IDs 1000000+, above SOCFortress range)
+# ---------------------------------------------------------------------------
+- name: Deploy CCDC custom rules file
+  ansible.builtin.copy:
+    src: local_rules.xml
+    dest: /var/ossec/etc/rules/local_rules.xml
+    owner: wazuh
+    group: wazuh
+    mode: "0660"
+  become: true
+  notify: Restart wazuh-manager
+
+- name: Deploy CCDC custom decoders file
+  ansible.builtin.copy:
+    src: local_decoder.xml
+    dest: /var/ossec/etc/decoders/local_decoder.xml
+    owner: wazuh
+    group: wazuh
+    mode: "0660"
+  become: true
+  notify: Restart wazuh-manager
+
+# ---------------------------------------------------------------------------
+# 3. Ensure wazuh-manager is running
+# ---------------------------------------------------------------------------
+- name: Ensure wazuh-manager is running
+  ansible.builtin.service:
+    name: wazuh-manager
+    state: started
+    enabled: true
+  become: true

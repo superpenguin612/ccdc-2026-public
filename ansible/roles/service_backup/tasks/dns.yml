@@ -1,0 +1,29 @@
+---
+# Export DNS zones using dnscmd (works for both file-backed and AD-integrated zones).
+# Exported files land in C:\Windows\System32\dns\ by default.
+- name: DNS — ensure backup directory exists on host
+  ansible.windows.win_file:
+    path: "{{ win_backup_root }}\\dns"
+    state: directory
+
+- name: DNS — create export directory
+  ansible.windows.win_file:
+    path: "{{ svc_dns_export_dir }}"
+    state: directory
+
+- name: DNS — export all primary zones via dnscmd
+  ansible.windows.win_shell: |
+    $zones = Get-DnsServerZone |
+      Where-Object { $_.ZoneType -eq 'Primary' -and -not $_.IsAutoCreated }
+    foreach ($zone in $zones) {
+      $file = "backup_$($zone.ZoneName).dns"
+      dnscmd /ZoneExport $zone.ZoneName $file
+    }
+    Write-Output "exported $($zones.Count) zones"
+  register: dns_export_result
+
+- name: DNS — zip exported zone files to local backup directory
+  ansible.windows.win_shell: |
+    $dest = "{{ win_backup_root }}\dns\dns_zones.zip"
+    if (Test-Path $dest) { Remove-Item $dest -Force }
+    Compress-Archive -Path "{{ svc_dns_export_dir }}\*" -DestinationPath $dest -Force

@@ -1,0 +1,42 @@
+- name: Check if Wazuh Agent service is installed
+  ansible.windows.win_service_info:
+    name: WazuhSvc
+  register: wazuh_agent_service
+
+- name: Ensure install location directory exists
+  ansible.windows.win_file:
+    path: "{{ wazuh_install_location }}"
+    state: directory
+  when: wazuh_agent_service.exists | default(false) == false
+
+- name: Download Wazuh Agent MSI package
+  ansible.windows.win_get_url:
+    url: "{{ wazuh_agent_install_package }}"
+    dest: "{{ wazuh_install_location }}\\wazuh-agent.msi"
+    validate_certs: no
+  register: wazuh_agent_download
+  until: wazuh_agent_download is succeeded
+  when: wazuh_agent_service.exists | default(false) == false
+
+- name: Install Wazuh Agent
+  ansible.windows.win_package:
+    path: "{{ wazuh_install_location }}\\wazuh-agent.msi"
+    state: present
+    arguments: >-
+      /q
+      WAZUH_MANAGER={{ wazuh_manager }}
+      WAZUH_AGENT_NAME={{ wazuh_agent_name }}
+      WAZUH_AGENT_GROUP={{ wazuh_agent_group }}
+  when: wazuh_agent_download is changed
+
+- name: Remove Wazuh Agent MSI package
+  ansible.windows.win_file:
+    path: "{{ wazuh_install_location }}\\wazuh-agent.msi"
+    state: absent
+  when: wazuh_agent_download is changed
+
+- name: Ensure Wazuh Agent service is running and set to auto-start
+  ansible.windows.win_service:
+    name: WazuhSvc
+    state: started
+    start_mode: auto

@@ -1,0 +1,38 @@
+---
+# Name of the scored IIS site
+iis_harden_site_name: "Default Web Site"
+
+# Name of the app pool to harden
+iis_harden_app_pool_name: "DefaultAppPool"
+
+# Remove X-Powered-By and Server response headers
+iis_harden_remove_version_headers: true
+
+# Enable request size limits
+iis_harden_set_request_limits: true
+iis_harden_max_url_length: 4096
+iis_harden_max_query_string: 2048
+
+# Block dangerous file extensions via request filtering
+iis_harden_block_extensions: true
+iis_harden_blocked_extensions:
+  - ".asa"
+  - ".asax"
+  - ".config"
+  - ".cs"
+  - ".csproj"
+  - ".vb"
+  - ".vbproj"
+  - ".webinfo"
+  - ".licx"
+  - ".resx"
+  - ".resources"
+
+# Disable WebDAV module if present
+iis_harden_disable_webdav: true
+
+# Enable W3C extended logging
+iis_harden_enable_logging: true
+
+# Set app pool identity to ApplicationPoolIdentity (least privilege)
+iis_harden_set_pool_identity: true

@@ -1,0 +1,7 @@
+---
+
+- name: Install OpenVAS/GVM and run vulnerability scans
+  hosts: ubuntu-wkst
+  gather_facts: true
+  roles:
+    - openvas

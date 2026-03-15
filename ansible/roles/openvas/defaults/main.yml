@@ -1,0 +1,86 @@
+---
+# =============================================================================
+# OpenVAS / Greenbone Vulnerability Manager (GVM)
+# Installed on ubuntu-wkst; performs authenticated scans of all scored hosts.
+#
+# Authenticated scan modes:
+#   Linux hosts → SSH (uses Ansible private key + azul user)
+#   Windows hosts → SMB (uses domain admin credentials from vault)
+#
+# After running this role, the GVM web UI is at:
+#   https://<ubuntu-wkst-ip>:9392
+#   Login: admin / <openvas_admin_password from vault>
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# GVM admin credentials
+# Set in vault:  vault_openvas_admin_password: "..."
+# ---------------------------------------------------------------------------
+openvas_admin_password: "{{ vault_openvas_admin_password | default('CHANGEME_set_in_vault') }}"
+
+# ---------------------------------------------------------------------------
+# SSH credential for Linux authenticated scanning
+# Uses the Ansible SSH private key already in the vault
+# ---------------------------------------------------------------------------
+openvas_ssh_credential_name: "CCDC-Linux-SSH"
+openvas_ssh_login: "azul"
+# Private key is read from vault_ssh_private_key (same key used by Ansible)
+
+# ---------------------------------------------------------------------------
+# SMB credential for Windows authenticated scanning
+# ---------------------------------------------------------------------------
+openvas_smb_credential_name: "CCDC-Windows-SMB"
+openvas_smb_login: "azul"
+openvas_smb_password: "{{ vault_new_credentials['server-web'].password | default('') }}"
+
+# ---------------------------------------------------------------------------
+# Scan targets
+# Grouped by OS for appropriate credential assignment.
+# Using internal IPs for authenticated scanning (scanner is internal).
+# ---------------------------------------------------------------------------
+openvas_linux_hosts:
+  - "{{ hostvars['ubuntu-ecom']['ip_internal'] }}"
+  - "{{ hostvars['fedora-webmail']['ip_internal'] }}"
+  - "{{ hostvars['splunk']['ip_internal'] }}"
+
+openvas_windows_hosts:
+  - "{{ hostvars['server-ad-dns']['ip_internal'] }}"
+  - "{{ hostvars['server-web']['ip_internal'] }}"
+  - "{{ hostvars['server-ftp']['ip_internal'] }}"
+
+# Also scan the firewall management interfaces
+openvas_scan_firewalls: false
+openvas_firewall_hosts:
+  - "{{ hostvars['palo-alto1']['ip_internal'] }}"
+
+# ---------------------------------------------------------------------------
+# Scan configuration
+# "Full and Fast" = comprehensive scan, avoids DoS-risk plugins
+# "Full and Very Deep" = enables more intrusive checks (may disrupt services)
+# ---------------------------------------------------------------------------
+openvas_scan_config: "Full and Fast"
+
+# Port scanning range — use "All TCP and Nmap top 100 UDP" for speed
+# or "All TCP" for full coverage
+openvas_port_list: "All TCP and Nmap top 100 UDP"
+
+# Alive test — use "Consider Alive" since hosts are behind NAT firewall
+# and ICMP may be filtered; we know they're up
+openvas_alive_test: "Consider Alive"
+
+# Max concurrency for the scanner (hosts in parallel)
+openvas_max_hosts: 4
+openvas_max_checks: 4
+
+# ---------------------------------------------------------------------------
+# Report output
+# Reports are exported as PDF/XML and fetched to the controller
+# ---------------------------------------------------------------------------
+openvas_report_dir: "{{ playbook_dir }}/../../reports"
+openvas_report_format: "XML"   # XML or PDF
+
+# ---------------------------------------------------------------------------
+# GVM feed update — set false to skip if feeds already downloaded
+# Feed download takes 10-20 minutes and ~2GB of data
+# ---------------------------------------------------------------------------
+openvas_update_feeds: true

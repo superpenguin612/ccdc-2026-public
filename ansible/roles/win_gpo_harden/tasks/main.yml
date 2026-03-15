@@ -1,0 +1,60 @@
+---
+# ---------------------------------------------------------------------------
+# Group Policy / Security hardening for Windows domain controller
+# Applied via registry and auditpol — no GPO RSAT dependency needed
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# 1. Advanced Audit Policy (via auditpol)
+# ---------------------------------------------------------------------------
+- name: "GPO — enable audit: Logon / Logoff (success + failure)"
+  ansible.windows.win_shell: |
+    auditpol /set /subcategory:"Logon" /success:enable /failure:enable
+    auditpol /set /subcategory:"Logoff" /success:enable /failure:enable
+    Write-Output "changed"
+  register: _gpo_audit_logon
+  changed_when: "'changed' in _gpo_audit_logon.stdout"
+  when: win_gpo_harden_audit_policy
+
+- name: "GPO — enable audit: Account Management (success + failure)"
+  ansible.windows.win_shell: |
+    auditpol /set /subcategory:"User Account Management" /success:enable /failure:enable
+    auditpol /set /subcategory:"Security Group Management" /success:enable /failure:enable
+    auditpol /set /subcategory:"Computer Account Management" /success:enable /failure:enable
+    Write-Output "changed"
+  register: _gpo_audit_acct
+  changed_when: "'changed' in _gpo_audit_acct.stdout"
+  when: win_gpo_harden_audit_policy
+
+- name: "GPO — enable audit: Process Tracking and Policy Change (success + failure)"
+  ansible.windows.win_shell: |
+    auditpol /set /subcategory:"Process Creation" /success:enable /failure:enable
+    auditpol /set /subcategory:"Audit Policy Change" /success:enable /failure:enable
+    auditpol /set /subcategory:"Authentication Policy Change" /success:enable /failure:enable
+    Write-Output "changed"
+  register: _gpo_audit_proc
+  changed_when: "'changed' in _gpo_audit_proc.stdout"
+  when: win_gpo_harden_audit_policy
+
+- name: "GPO — enable audit: Object Access and Privilege Use (failure only)"
+  ansible.windows.win_shell: |
+    auditpol /set /subcategory:"File System" /failure:enable
+    auditpol /set /subcategory:"Registry" /failure:enable
+    auditpol /set /subcategory:"Sensitive Privilege Use" /success:enable /failure:enable
+    Write-Output "changed"
+  register: _gpo_audit_obj
+  changed_when: "'changed' in _gpo_audit_obj.stdout"
+  when: win_gpo_harden_audit_policy
+
+# ---------------------------------------------------------------------------
+# 2. Account Lockout Policy
+# ---------------------------------------------------------------------------
+- name: "GPO — set account lockout policy"
+  ansible.windows.win_shell: |
+    net accounts /lockoutthreshold:{{ win_gpo_harden_lockout_threshold }} /lockoutduration:{{ win_gpo_harden_lockout_duration }} /lockoutwindow:{{ win_gpo_harden_lockout_window }}
+    Write-Output "changed"
+  register: _gpo_lockout
+  changed_when: "'changed' in _gpo_lockout.stdout"
+  when: win_gpo_harden_account_lockout
+
+# NOTE: Credential Guard and NTLM restriction are handled by win_hardening role.

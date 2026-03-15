@@ -1,0 +1,46 @@
+---
+# Tasks for non-DC Windows hosts (domain_members + standalone)
+
+- name: Create new local admin account
+  ansible.windows.win_user:
+    name: "{{ vault_new_credentials[inventory_hostname].user }}"
+    password: "{{ vault_new_credentials[inventory_hostname].password }}"
+    password_never_expires: yes
+    user_cannot_change_password: no
+    groups:
+      - Administrators
+    state: present
+
+# Required so the new local account gets a full (non-filtered) token over WinRM
+- name: Enable LocalAccountTokenFilterPolicy
+  ansible.windows.win_regedit:
+    path: HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System
+    name: LocalAccountTokenFilterPolicy
+    data: 1
+    type: dword
+
+- name: Restart WinRM to apply policy (fire-and-forget - connection will drop)
+  ansible.windows.win_shell: Restart-Service WinRM
+  async: 10
+  poll: 0
+
+- name: Wait for WinRM to come back
+  ansible.builtin.wait_for:
+    host: "{{ ansible_host }}"
+    port: "{{ ansible_port | int }}"
+    timeout: 60
+    sleep: 3
+  delegate_to: localhost
+
+- name: Disable old local account
+  ansible.windows.win_user:
+    name: "{{ host_defaults[inventory_hostname].user }}"
+    account_disabled: yes
+    state: present
+  when: '"\\" not in host_defaults[inventory_hostname].user'
+
+- name: Disable domain account via DC
+  ansible.windows.win_shell: |
+    Disable-ADAccount -Identity "{{ ad_disable_user }}"
+  delegate_to: "{{ groups['domain_controllers'] | first }}"
+  when: ad_disable_user is defined

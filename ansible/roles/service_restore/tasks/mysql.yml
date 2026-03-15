@@ -1,0 +1,29 @@
+---
+- name: MySQL — stop service
+  ansible.builtin.service:
+    name: mysql
+    state: stopped
+  become: true
+  failed_when: false
+
+- name: MySQL — wipe and restore /etc/mysql from local backup
+  ansible.builtin.shell: |
+    rm -rf /etc/mysql
+    tar -xzf {{ linux_backup_root }}/mysql/mysql_config.tar.gz -C /
+  become: true
+  failed_when: false
+
+- name: MySQL — restore my.cnf from local backup
+  ansible.builtin.shell: tar -xzf {{ linux_backup_root }}/mysql/mysql_myconf.tar.gz -C /
+  become: true
+  failed_when: false
+
+- name: MySQL — start service
+  ansible.builtin.service:
+    name: mysql
+    state: started
+  become: true
+
+- name: MySQL — import dump from local backup
+  ansible.builtin.shell: zcat {{ linux_backup_root }}/mysql/mysql_all.sql.gz | mysql
+  become: true

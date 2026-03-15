@@ -1,0 +1,10 @@
+---
+# Path to MySQL server config (Ubuntu/Debian default)
+mysql_harden_config_path: /etc/mysql/mysql.conf.d/mysqld.cnf
+
+# Enable general query log (exposes all queries to Wazuh via file)
+mysql_harden_enable_logging: true
+
+# Root password to set — reference vault in host_vars or group_vars:
+#   mysql_harden_root_password: "{{ vault_mysql_root_password }}"
+mysql_harden_root_password: ""

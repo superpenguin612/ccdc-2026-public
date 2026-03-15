@@ -1,0 +1,34 @@
+---
+# Service-specific hardening for Windows scored services.
+# Run after 002-hardening-windows.yml.
+#
+# Usage:
+#   ansible-playbook playbooks/windows/003-services.yml
+
+- name: Harden Active Directory and DNS
+  hosts: domain_controllers
+  gather_facts: true
+  roles:
+    - ad_harden
+    - dns_harden
+    - win_gpo_harden
+    - ad_audit
+
+- name: Harden IIS web server
+  hosts: svc_iis
+  gather_facts: false
+  roles:
+    - iis_harden
+
+- name: Harden IIS FTP server
+  hosts: svc_iis_ftp
+  gather_facts: false
+  roles:
+    - iis_ftp_harden
+
+- name: Logging and other hardening for all Windows hosts
+  hosts: windows
+  gather_facts: false
+  roles:
+    - win_logging
+    - win_defender_harden
